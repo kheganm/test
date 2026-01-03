@@ -1,0 +1,423 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: #f5f6fa;
+    overflow: hidden;
+}
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* Header / Toolbar */
+.toolbar {
+    background: #2c3e50;
+    color: white;
+    padding: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    z-index: 100;
+}
+
+.toolbar h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.toolbar-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+/* Buttons */
+.btn {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-weight: 500;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+.btn-primary {
+    background: #3498db;
+    color: white;
+}
+
+.btn-success {
+    background: #2ecc71;
+    color: white;
+}
+
+.btn-danger {
+    background: #e74c3c;
+    color: white;
+}
+
+.btn-block {
+    width: 100%;
+    justify-content: center;
+}
+
+.icon {
+    font-size: 1.1rem;
+}
+
+/* Export Dropdown */
+.export-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+.dropdown-content {
+    display: none;
+    position: absolute;
+    right: 0;
+    background-color: white;
+    min-width: 160px;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+    border-radius: 4px;
+    z-index: 1000;
+    overflow: hidden;
+}
+
+.export-dropdown:hover .dropdown-content {
+    display: block;
+}
+
+.dropdown-content a {
+    color: #2c3e50;
+    padding: 12px 16px;
+    text-decoration: none;
+    display: block;
+    transition: background 0.2s;
+}
+
+.dropdown-content a:hover {
+    background-color: #f1f1f1;
+}
+
+/* Main Content */
+.main-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Sidebar */
+.sidebar {
+    width: 280px;
+    background: white;
+    border-right: 1px solid #ddd;
+    overflow-y: auto;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.05);
+}
+
+.panel {
+    padding: 1rem;
+}
+
+.panel h3 {
+    margin-bottom: 1rem;
+    color: #2c3e50;
+    font-size: 1.2rem;
+}
+
+.panel h4 {
+    margin: 1rem 0 0.5rem 0;
+    color: #34495e;
+    font-size: 1rem;
+}
+
+.tool-group {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #ecf0f1;
+}
+
+.tool-group:last-child {
+    border-bottom: none;
+}
+
+.tool-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: #555;
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.tool-group input[type="text"],
+.tool-group input[type="color"],
+.tool-group select {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+}
+
+.tool-group input[type="color"] {
+    height: 40px;
+    cursor: pointer;
+}
+
+/* Mode Buttons */
+.mode-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.5rem;
+}
+
+.mode-btn {
+    padding: 0.7rem;
+    border: 2px solid #ddd;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+}
+
+.mode-btn:hover {
+    border-color: #3498db;
+    background: #f8f9fa;
+}
+
+.mode-btn.active {
+    background: #3498db;
+    color: white;
+    border-color: #3498db;
+}
+
+/* Color Picker */
+.color-picker-group {
+    margin-bottom: 0.5rem;
+}
+
+.preset-colors {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.color-preset {
+    width: 100%;
+    aspect-ratio: 1;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.color-preset:hover {
+    transform: scale(1.1);
+    border-color: #333;
+}
+
+/* Canvas Container */
+.canvas-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: #ffffff;
+}
+
+#flowchartCanvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+}
+
+.canvas-info {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    .toolbar {
+        padding: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .toolbar h1 {
+        font-size: 1.2rem;
+        width: 100%;
+        margin-bottom: 0.5rem;
+    }
+
+    .toolbar-actions {
+        width: 100%;
+        justify-content: space-between;
+        flex-wrap: wrap;
+    }
+
+    .btn {
+        padding: 0.4rem 0.6rem;
+        font-size: 0.8rem;
+    }
+
+    .btn .icon {
+        font-size: 1rem;
+    }
+
+    /* Hide text on mobile, show only icons */
+    .btn span:not(.icon) {
+        display: none;
+    }
+
+    .sidebar {
+        position: fixed;
+        left: -280px;
+        top: 0;
+        height: 100vh;
+        width: 280px;
+        z-index: 200;
+        transition: left 0.3s ease;
+        padding-top: 120px;
+    }
+
+    .sidebar.open {
+        left: 0;
+    }
+
+    .main-content {
+        flex-direction: column;
+    }
+
+    .canvas-container {
+        width: 100%;
+        height: calc(100vh - 120px);
+    }
+
+    .mode-buttons {
+        grid-template-columns: 1fr 1fr 1fr;
+    }
+
+    .mode-btn {
+        padding: 0.5rem;
+        font-size: 0.7rem;
+    }
+
+    .canvas-info {
+        font-size: 0.75rem;
+        padding: 0.3rem 0.6rem;
+    }
+
+    /* Mobile touch-friendly adjustments */
+    .tool-group input,
+    .tool-group select,
+    .tool-group button {
+        font-size: 16px; /* Prevents zoom on iOS */
+    }
+}
+
+@media (max-width: 480px) {
+    .preset-colors {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.3rem;
+    }
+
+    .toolbar-actions {
+        gap: 0.3rem;
+    }
+}
+
+/* Scrollbar Styling */
+.sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 3px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Loading State */
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading {
+    animation: spin 1s linear infinite;
+}
+
+/* Selection Highlight */
+.selected-indicator {
+    border: 2px dashed #3498db !important;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.panel {
+    animation: fadeIn 0.3s ease;
+}
+
+/* Print Styles */
+@media print {
+    .toolbar,
+    .sidebar,
+    .canvas-info {
+        display: none;
+    }
+
+    .canvas-container {
+        width: 100%;
+        height: 100%;
+    }
+}

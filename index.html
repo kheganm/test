@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Flowchart Builder</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="toolbar">
+            <h1>Flowchart Builder</h1>
+            <div class="toolbar-actions">
+                <button id="clearBtn" class="btn btn-danger" title="Clear Canvas">
+                    <span class="icon">🗑️</span> Clear
+                </button>
+                <button id="saveBtn" class="btn btn-primary" title="Save Flowchart">
+                    <span class="icon">💾</span> Save
+                </button>
+                <button id="loadBtn" class="btn btn-primary" title="Load Flowchart">
+                    <span class="icon">📂</span> Load
+                </button>
+                <div class="export-dropdown">
+                    <button id="exportBtn" class="btn btn-success" title="Export">
+                        <span class="icon">📥</span> Export
+                    </button>
+                    <div class="dropdown-content">
+                        <a href="#" id="exportPNG">Export as PNG</a>
+                        <a href="#" id="exportJPG">Export as JPG</a>
+                        <a href="#" id="exportSVG">Export as SVG</a>
+                        <a href="#" id="exportPPTX">Export as PPTX</a>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <div class="panel">
+                    <h3>Tools</h3>
+
+                    <!-- Mode Selection -->
+                    <div class="tool-group">
+                        <label>Mode:</label>
+                        <div class="mode-buttons">
+                            <button id="selectMode" class="mode-btn active" title="Select/Move">
+                                <span class="icon">👆</span> Select
+                            </button>
+                            <button id="boxMode" class="mode-btn" title="Add Box">
+                                <span class="icon">⬜</span> Box
+                            </button>
+                            <button id="connectorMode" class="mode-btn" title="Add Connector">
+                                <span class="icon">➡️</span> Connect
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Box Settings -->
+                    <div class="tool-group">
+                        <h4>Box Settings</h4>
+                        <label for="boxColor">Color:</label>
+                        <div class="color-picker-group">
+                            <input type="color" id="boxColor" value="#3498db">
+                            <div class="preset-colors">
+                                <button class="color-preset" style="background: #3498db" data-color="#3498db"></button>
+                                <button class="color-preset" style="background: #2ecc71" data-color="#2ecc71"></button>
+                                <button class="color-preset" style="background: #e74c3c" data-color="#e74c3c"></button>
+                                <button class="color-preset" style="background: #f39c12" data-color="#f39c12"></button>
+                                <button class="color-preset" style="background: #9b59b6" data-color="#9b59b6"></button>
+                                <button class="color-preset" style="background: #1abc9c" data-color="#1abc9c"></button>
+                                <button class="color-preset" style="background: #34495e" data-color="#34495e"></button>
+                                <button class="color-preset" style="background: #95a5a6" data-color="#95a5a6"></button>
+                            </div>
+                        </div>
+
+                        <label for="boxShape">Shape:</label>
+                        <select id="boxShape">
+                            <option value="rectangle">Rectangle</option>
+                            <option value="rounded">Rounded Rectangle</option>
+                            <option value="ellipse">Ellipse</option>
+                            <option value="diamond">Diamond</option>
+                            <option value="parallelogram">Parallelogram</option>
+                        </select>
+
+                        <label for="boxText">Text:</label>
+                        <input type="text" id="boxText" placeholder="Enter text...">
+                    </div>
+
+                    <!-- Connector Settings -->
+                    <div class="tool-group">
+                        <h4>Connector Settings</h4>
+                        <label for="connectorType">Type:</label>
+                        <select id="connectorType">
+                            <option value="straight">Straight</option>
+                            <option value="curved">Curved</option>
+                            <option value="orthogonal">Orthogonal</option>
+                        </select>
+
+                        <label for="connectorLabel">Label:</label>
+                        <input type="text" id="connectorLabel" placeholder="Connector label...">
+
+                        <label for="arrowType">Arrow:</label>
+                        <select id="arrowType">
+                            <option value="end">End Only</option>
+                            <option value="both">Both Ends</option>
+                            <option value="none">No Arrow</option>
+                        </select>
+                    </div>
+
+                    <!-- Selection Actions -->
+                    <div class="tool-group" id="selectionActions" style="display: none;">
+                        <h4>Selection</h4>
+                        <button id="deleteSelected" class="btn btn-danger btn-block">
+                            <span class="icon">🗑️</span> Delete Selected
+                        </button>
+                        <button id="duplicateSelected" class="btn btn-primary btn-block">
+                            <span class="icon">📋</span> Duplicate
+                        </button>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Canvas Area -->
+            <div class="canvas-container">
+                <canvas id="flowchartCanvas"></canvas>
+                <div class="canvas-info">
+                    <span id="canvasInfo">Click to add boxes | Drag to move | Right-click for options</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden file input for loading -->
+    <input type="file" id="fileInput" accept=".json" style="display: none;">
+
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PptxGenJS/3.12.0/pptxgen.bundle.js"></script>
+
+    <!-- App Script -->
+    <script src="flowchart.js"></script>
+</body>
+</html>
