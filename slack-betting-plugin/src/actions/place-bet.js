@@ -61,7 +61,7 @@ function registerPlaceBetActions(app) {
       await client.chat.postEphemeral({
         channel: market.channel_id,
         user: body.user.id,
-        text: `:white_check_mark: Bet placed! You wagered *${amount} coins* on *${market.options.find((o) => Number(o.id) === optionId)?.label}*.`,
+        text: `\u2705 Bet placed! You wagered *${amount} coins* on *${market.options.find((o) => Number(o.id) === optionId)?.label}*.`,
       });
     } catch (err) {
       await ack({

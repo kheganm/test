@@ -22,7 +22,7 @@ function startScheduler(app) {
 
         await app.client.chat.postMessage({
           channel: updated.channel_id,
-          text: `:alarm_clock: Betting is now *CLOSED* on *${updated.title}*. Time's up! Waiting for results...`,
+          text: `\u23F0 Betting is now *CLOSED* on *${updated.title}*. Time's up! Waiting for results...`,
         });
       }
     } catch (err) {

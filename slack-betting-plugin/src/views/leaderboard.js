@@ -12,7 +12,7 @@ async function buildLeaderboardMessage() {
     ];
   }
 
-  const medals = [':first_place_medal:', ':second_place_medal:', ':third_place_medal:'];
+  const medals = ['\uD83E\uDD47', '\uD83E\uDD48', '\uD83E\uDD49'];
   const lines = leaders.map((user, i) => {
     const medal = medals[i] || `${i + 1}.`;
     return `${medal} <@${user.slack_id}> — *${user.balance}* coins`;

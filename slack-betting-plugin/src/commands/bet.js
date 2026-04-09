@@ -68,7 +68,7 @@ async function handleBalance(command, respond) {
   const balance = await getBalance(command.user_id);
   await respond({
     response_type: 'ephemeral',
-    text: `:coin: Your balance: *${balance} coins*`,
+    text: `\uD83E\uDE99 Your balance: *${balance} coins*`,
   });
 }
 
@@ -92,7 +92,7 @@ async function handleMarkets(command, respond) {
   }
 
   const lines = markets.map((m) => {
-    const status = m.status === 'open' ? ':green_circle:' : ':red_circle:';
+    const status = m.status === 'open' ? '\uD83D\uDFE2' : '\uD83D\uDD34';
     return `${status} *#${m.id}* — ${m.title} (${m.status})`;
   });
 
@@ -180,7 +180,7 @@ async function handleLoan(command, args, respond, client) {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `:bank: <@${command.user_id}> is offering <@${borrowerId}> a loan!\n\n:moneybag: *Amount:* ${amount} coins\n:chart_with_upwards_trend: *Interest:* ${interestRate}%\n:money_with_wings: *Total to repay:* ${loan.total_owed} coins`,
+            text: `\uD83C\uDFE6 <@${command.user_id}> is offering <@${borrowerId}> a loan!\n\n\uD83D\uDCB0 *Amount:* ${amount} coins\n\uD83D\uDCC8 *Interest:* ${interestRate}%\n\uD83D\uDCB8 *Total to repay:* ${loan.total_owed} coins`,
           },
         },
         { type: 'divider' },
@@ -215,7 +215,7 @@ async function handleLoan(command, args, respond, client) {
 
     await getDb().execute({ sql: 'UPDATE loans SET message_ts = ? WHERE id = ?', args: [result.ts, loan.id] });
   } catch (err) {
-    await respond({ response_type: 'ephemeral', text: `:x: ${err.message}` });
+    await respond({ response_type: 'ephemeral', text: `\u274C ${err.message}` });
   }
 }
 
@@ -233,10 +233,10 @@ async function handleRepay(command, args, respond) {
     const loan = await repayLoan(loanId, command.user_id);
     await respond({
       response_type: 'in_channel',
-      text: `:white_check_mark: <@${command.user_id}> repaid *${loan.total_owed} coins* to <@${loan.lender_id}> (Loan #${loan.id}). Debt cleared!`,
+      text: `\u2705 <@${command.user_id}> repaid *${loan.total_owed} coins* to <@${loan.lender_id}> (Loan #${loan.id}). Debt cleared!`,
     });
   } catch (err) {
-    await respond({ response_type: 'ephemeral', text: `:x: ${err.message}` });
+    await respond({ response_type: 'ephemeral', text: `\u274C ${err.message}` });
   }
 }
 
@@ -256,8 +256,8 @@ async function handleLoans(command, respond) {
   if (received.length > 0) {
     lines.push('*Loans you owe:*');
     for (const loan of received) {
-      const statusIcon = loan.status === 'pending' ? ':hourglass:' : ':money_with_wings:';
-      lines.push(`${statusIcon} Loan #${loan.id} — ${loan.amount} coins from <@${loan.lender_id}> at ${loan.interest_rate}% → owe *${loan.total_owed} coins* (${loan.status})`);
+      const statusIcon = loan.status === 'pending' ? '\u231B' : '\uD83D\uDCB8';
+      lines.push(`${statusIcon} Loan #${loan.id} — ${loan.amount} coins from <@${loan.lender_id}> at ${loan.interest_rate}% \u2192 owe *${loan.total_owed} coins* (${loan.status})`);
     }
   }
 
@@ -265,8 +265,8 @@ async function handleLoans(command, respond) {
     if (lines.length > 0) lines.push('');
     lines.push('*Loans you gave:*');
     for (const loan of given) {
-      const statusIcon = loan.status === 'pending' ? ':hourglass:' : ':bank:';
-      lines.push(`${statusIcon} Loan #${loan.id} — ${loan.amount} coins to <@${loan.borrower_id}> at ${loan.interest_rate}% → owed *${loan.total_owed} coins* (${loan.status})`);
+      const statusIcon = loan.status === 'pending' ? '\u231B' : '\uD83C\uDFE6';
+      lines.push(`${statusIcon} Loan #${loan.id} — ${loan.amount} coins to <@${loan.borrower_id}> at ${loan.interest_rate}% \u2192 owed *${loan.total_owed} coins* (${loan.status})`);
     }
   }
 
@@ -278,7 +278,7 @@ async function handleLoans(command, respond) {
 
 async function handleGive(command, args, respond, client) {
   if (!isAdmin(command.user_id)) {
-    await respond({ response_type: 'ephemeral', text: ':no_entry: Only admins can use `/bet give`.' });
+    await respond({ response_type: 'ephemeral', text: '\uD83D\uDEAB Only admins can use `/bet give`.' });
     return;
   }
 
@@ -300,13 +300,13 @@ async function handleGive(command, args, respond, client) {
 
   await respond({
     response_type: 'ephemeral',
-    text: `:moneybag: Gave *${amount} coins* to <@${targetUserId}>. Their new balance: *${newBalance} coins*`,
+    text: `\uD83D\uDCB0 Gave *${amount} coins* to <@${targetUserId}>. Their new balance: *${newBalance} coins*`,
   });
 }
 
 async function handleReset(command, args, respond, client) {
   if (!isAdmin(command.user_id)) {
-    await respond({ response_type: 'ephemeral', text: ':no_entry: Only admins can use `/bet reset`.' });
+    await respond({ response_type: 'ephemeral', text: '\uD83D\uDEAB Only admins can use `/bet reset`.' });
     return;
   }
 
@@ -325,7 +325,7 @@ async function handleReset(command, args, respond, client) {
 
   await respond({
     response_type: 'ephemeral',
-    text: `:arrows_counterclockwise: Reset <@${targetUserId}>'s balance to *${startingBalance} coins*`,
+    text: `\uD83D\uDD04 Reset <@${targetUserId}>'s balance to *${startingBalance} coins*`,
   });
 }
 

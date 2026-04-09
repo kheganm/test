@@ -38,7 +38,7 @@ function registerLoanActions(app) {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `:handshake: *Loan Accepted!*\n\n<@${loan.lender_id}> lent *${loan.amount} coins* to <@${loan.borrower_id}> at *${loan.interest_rate}%* interest.\n\n:money_with_wings: <@${loan.borrower_id}> owes *${loan.total_owed} coins* back.\nUse \`/bet repay ${loanId}\` to repay.`,
+              text: `\uD83E\uDD1D *Loan Accepted!*\n\n<@${loan.lender_id}> lent *${loan.amount} coins* to <@${loan.borrower_id}> at *${loan.interest_rate}%* interest.\n\n\uD83D\uDCB8 <@${loan.borrower_id}> owes *${loan.total_owed} coins* back.\nUse \`/bet repay ${loanId}\` to repay.`,
             },
           },
         ],
@@ -48,7 +48,7 @@ function registerLoanActions(app) {
       await client.chat.postEphemeral({
         channel: body.channel.id,
         user: body.user.id,
-        text: `:x: ${err.message}`,
+        text: `\u274C ${err.message}`,
       });
     }
   });
@@ -79,7 +79,7 @@ function registerLoanActions(app) {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `:no_entry_sign: *Loan Declined*\n\n<@${loan.borrower_id}> declined the *${loan.amount} coin* loan from <@${loan.lender_id}>.`,
+            text: `\uD83D\uDEAB *Loan Declined*\n\n<@${loan.borrower_id}> declined the *${loan.amount} coin* loan from <@${loan.lender_id}>.`,
           },
         },
       ],

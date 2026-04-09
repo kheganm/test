@@ -2,10 +2,10 @@ const { getPoolByOption, getTotalPool } = require('../models/bet');
 const { calculateOdds, formatOdds } = require('../utils/odds');
 
 const STATUS_EMOJI = {
-  open: ':green_circle:',
-  closed: ':red_circle:',
-  resolved: ':checkered_flag:',
-  cancelled: ':no_entry_sign:',
+  open: '\uD83D\uDFE2',       // green circle
+  closed: '\uD83D\uDD34',     // red circle
+  resolved: '\uD83C\uDFC1',   // checkered flag
+  cancelled: '\uD83D\uDEAB',  // no entry sign
 };
 
 async function buildMarketMessage(market) {
@@ -16,7 +16,7 @@ async function buildMarketMessage(market) {
     poolMap[p.option_id] = p;
   }
 
-  const statusEmoji = STATUS_EMOJI[market.status] || ':grey_question:';
+  const statusEmoji = STATUS_EMOJI[market.status] || '\u2753';
   const blocks = [];
 
   blocks.push({
@@ -24,9 +24,9 @@ async function buildMarketMessage(market) {
     text: { type: 'plain_text', text: `${market.title}`, emoji: true },
   });
 
-  let statusText = `${statusEmoji} *Status:* ${market.status.toUpperCase()}  |  :moneybag: *Total Pool:* ${totalPool} coins`;
+  let statusText = `${statusEmoji} *Status:* ${market.status.toUpperCase()}  |  \uD83D\uDCB0 *Total Pool:* ${totalPool} coins`;
   if (market.close_at && market.status === 'open') {
-    statusText += `\n:alarm_clock: *Betting closes:* <!date^${Math.floor(new Date(market.close_at + 'Z').getTime() / 1000)}^{date_short_pretty} at {time}|${market.close_at}>`;
+    statusText += `\n\u23F0 *Betting closes:* <!date^${Math.floor(new Date(market.close_at + 'Z').getTime() / 1000)}^{date_short_pretty} at {time}|${market.close_at}>`;
   }
   if (market.description) statusText += `\n${market.description}`;
 
@@ -44,7 +44,7 @@ async function buildMarketMessage(market) {
     const odds = calculateOdds(poolAmount, totalPool);
     const percentage = totalPool > 0 ? ((poolAmount / totalPool) * 100).toFixed(1) : '0.0';
     const progressBar = buildProgressBar(totalPool > 0 ? poolAmount / totalPool : 0);
-    const winnerTag = option.is_winner ? ' :trophy: *WINNER*' : '';
+    const winnerTag = option.is_winner ? ' \uD83C\uDFC6 *WINNER*' : '';
 
     const sectionBlock = {
       type: 'section',
@@ -57,7 +57,7 @@ async function buildMarketMessage(market) {
     if (market.status === 'open') {
       sectionBlock.accessory = {
         type: 'button',
-        text: { type: 'plain_text', text: `Bet on this`, emoji: true },
+        text: { type: 'plain_text', text: 'Bet on this', emoji: true },
         action_id: `place_bet_${market.id}_${option.id}`,
         value: JSON.stringify({ marketId: Number(market.id), optionId: Number(option.id) }),
         style: 'primary',
@@ -75,7 +75,7 @@ async function buildMarketMessage(market) {
       elements: [
         {
           type: 'button',
-          text: { type: 'plain_text', text: ':x: Cancel Market', emoji: true },
+          text: { type: 'plain_text', text: '\u274C Cancel Market', emoji: true },
           action_id: `cancel_market_${market.id}`,
           value: String(market.id),
         },
@@ -84,7 +84,7 @@ async function buildMarketMessage(market) {
   } else if (market.status === 'closed') {
     const resolveButtons = market.options.map((option) => ({
       type: 'button',
-      text: { type: 'plain_text', text: `:trophy: ${option.label} wins`, emoji: true },
+      text: { type: 'plain_text', text: `\uD83C\uDFC6 ${option.label} wins`, emoji: true },
       action_id: `resolve_market_${market.id}_${option.id}`,
       value: JSON.stringify({ marketId: Number(market.id), optionId: Number(option.id) }),
       style: 'primary',
@@ -100,7 +100,7 @@ async function buildMarketMessage(market) {
     elements: [
       {
         type: 'mrkdwn',
-        text: `Created by <@${market.created_by}>  |  Market #${market.id}${market.status === 'open' ? '  |  Use the buttons above or `/bet place` to bet' : ''}`,
+        text: `Created by <@${market.created_by}>  |  Market #${market.id}${market.status === 'open' ? '  |  Use the buttons above to bet' : ''}`,
       },
     ],
   });

@@ -83,7 +83,7 @@ function registerManageMarketActions(app) {
       await client.chat.postEphemeral({
         channel: body.channel.id,
         user: body.user.id,
-        text: ':no_entry: Only the market creator or an admin can close betting.',
+        text: '\uD83D\uDEAB Only the market creator or an admin can close betting.',
       });
       return;
     }
@@ -101,7 +101,7 @@ function registerManageMarketActions(app) {
 
     await client.chat.postMessage({
       channel: updated.channel_id,
-      text: `:lock: Betting is now *CLOSED* on *${updated.title}*. Waiting for results...`,
+      text: `\uD83D\uDD12 Betting is now *CLOSED* on *${updated.title}*. Waiting for results...`,
     });
   });
 
@@ -117,7 +117,7 @@ function registerManageMarketActions(app) {
       await client.chat.postEphemeral({
         channel: body.channel.id,
         user: body.user.id,
-        text: ':no_entry: Only the market creator or an admin can resolve this market.',
+        text: '\uD83D\uDEAB Only the market creator or an admin can resolve this market.',
       });
       return;
     }
@@ -134,12 +134,12 @@ function registerManageMarketActions(app) {
       text: updated.title,
     });
 
-    let resultText = `:checkered_flag: *${updated.title}* has been resolved!\n:trophy: Winner: *${winner.label}*\n\n`;
+    let resultText = `\uD83C\uDFC1 *${updated.title}* has been resolved!\n\uD83C\uDFC6 Winner: *${winner.label}*\n\n`;
     if (payouts.length === 0) {
       resultText += '_No winning bets — the house keeps the pool!_';
     } else {
       const payoutLines = payouts.map(
-        (p) => `<@${p.slackId}>: bet ${p.amount} → won *${p.payout} coins* :moneybag:`
+        (p) => `<@${p.slackId}>: bet ${p.amount} \u2192 won *${p.payout} coins* \uD83D\uDCB0`
       );
       resultText += `*Payouts:*\n${payoutLines.join('\n')}`;
     }
@@ -162,7 +162,7 @@ function registerManageMarketActions(app) {
       await client.chat.postEphemeral({
         channel: body.channel.id,
         user: body.user.id,
-        text: ':no_entry: Only the market creator or an admin can cancel this market.',
+        text: '\uD83D\uDEAB Only the market creator or an admin can cancel this market.',
       });
       return;
     }
@@ -180,7 +180,7 @@ function registerManageMarketActions(app) {
 
     await client.chat.postMessage({
       channel: updated.channel_id,
-      text: `:no_entry_sign: *${updated.title}* has been cancelled. All bets (${refunds.length}) have been refunded.`,
+      text: `\uD83D\uDEAB *${updated.title}* has been cancelled. All bets (${refunds.length}) have been refunded.`,
     });
   });
 }
