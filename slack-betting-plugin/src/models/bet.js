@@ -41,4 +41,24 @@ async function getUserBetsOnMarket(slackId, marketId) {
   return result.rows;
 }
 
-module.exports = { placeBet, getPoolByOption, getTotalPool, getUserBetsOnMarket };
+async function getTopBettorsByOption(marketId) {
+  const result = await getDb().execute({
+    sql: `SELECT option_id, slack_id, SUM(amount) as total
+          FROM bets WHERE market_id = ?
+          GROUP BY option_id, slack_id
+          ORDER BY option_id, total DESC`,
+    args: [marketId],
+  });
+
+  const byOption = {};
+  for (const row of result.rows) {
+    const optId = row.option_id;
+    if (!byOption[optId]) byOption[optId] = [];
+    if (byOption[optId].length < 5) {
+      byOption[optId].push({ slackId: row.slack_id, total: Number(row.total) });
+    }
+  }
+  return byOption;
+}
+
+module.exports = { placeBet, getPoolByOption, getTotalPool, getUserBetsOnMarket, getTopBettorsByOption };
