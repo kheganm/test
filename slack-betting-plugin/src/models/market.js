@@ -117,4 +117,29 @@ async function cancelMarket(marketId) {
   }
 }
 
-module.exports = { createMarket, getMarket, getActiveMarkets, setMessageTs, closeMarket, getMarketsToClose, resolveMarket, cancelMarket };
+async function deleteMarket(marketId) {
+  const db = getDb();
+  const tx = await db.transaction('write');
+  try {
+    // Refund any bets if market was still open
+    const market = await tx.execute({ sql: 'SELECT status FROM markets WHERE id = ?', args: [marketId] });
+    if (market.rows.length === 0) throw new Error('Market not found.');
+
+    if (market.rows[0].status === 'open') {
+      const betsResult = await tx.execute({ sql: 'SELECT * FROM bets WHERE market_id = ?', args: [marketId] });
+      for (const bet of betsResult.rows) {
+        await tx.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE slack_id = ?', args: [bet.amount, bet.slack_id] });
+      }
+    }
+
+    await tx.execute({ sql: 'DELETE FROM bets WHERE market_id = ?', args: [marketId] });
+    await tx.execute({ sql: 'DELETE FROM options WHERE market_id = ?', args: [marketId] });
+    await tx.execute({ sql: 'DELETE FROM markets WHERE id = ?', args: [marketId] });
+    await tx.commit();
+  } catch (err) {
+    await tx.rollback();
+    throw err;
+  }
+}
+
+module.exports = { createMarket, getMarket, getActiveMarkets, setMessageTs, closeMarket, getMarketsToClose, resolveMarket, cancelMarket, deleteMarket };

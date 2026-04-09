@@ -1,6 +1,6 @@
 const { getDb } = require('../db');
 const { getBalance, addBalance, getOrCreateUser } = require('../models/user');
-const { getActiveMarkets, getMarket } = require('../models/market');
+const { getActiveMarkets, getMarket, deleteMarket } = require('../models/market');
 const { getUserBetsOnMarket, withdrawUserBets } = require('../models/bet');
 const { createLoan, repayLoan, getActiveLoansForUser } = require('../models/loan');
 const { isAdmin } = require('../utils/permissions');
@@ -51,6 +51,9 @@ function registerBetCommand(app) {
         break;
       case 'reset':
         await handleReset(command, args, respond, client);
+        break;
+      case 'delete':
+        await handleDelete(command, args, respond, client);
         break;
       case 'help':
       case '':
@@ -391,6 +394,52 @@ async function handleReset(command, args, respond, client) {
   });
 }
 
+async function handleDelete(command, args, respond, client) {
+  if (!isAdmin(command.user_id)) {
+    await respond({ response_type: 'ephemeral', text: '\uD83D\uDEAB Only admins can use `/bet delete`.' });
+    return;
+  }
+
+  const marketId = parseInt(args[1], 10);
+  if (!marketId) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'Usage: `/bet delete <market_id>` — Delete a market and remove its message',
+    });
+    return;
+  }
+
+  const market = await getMarket(marketId);
+  if (!market) {
+    await respond({ response_type: 'ephemeral', text: 'Market not found.' });
+    return;
+  }
+
+  try {
+    // Delete the Slack message
+    if (market.message_ts) {
+      try {
+        await client.chat.delete({
+          channel: market.channel_id,
+          ts: market.message_ts,
+        });
+      } catch (e) {
+        console.error(`[delete] Could not delete Slack message for market #${marketId}:`, e.message);
+      }
+    }
+
+    const wasOpen = market.status === 'open';
+    await deleteMarket(marketId);
+
+    let msg = `\uD83D\uDDD1\uFE0F Market #${marketId} (*${market.title}*) has been deleted.`;
+    if (wasOpen) msg += ' All bets have been refunded.';
+
+    await respond({ response_type: 'ephemeral', text: msg });
+  } catch (err) {
+    await respond({ response_type: 'ephemeral', text: `\u274C ${err.message}` });
+  }
+}
+
 async function handleHelp(respond) {
   await respond({
     response_type: 'ephemeral',
@@ -412,6 +461,7 @@ async function handleHelp(respond) {
       '*Admin Commands:*',
       '`/bet give @user 500` — Give coins to a user',
       '`/bet reset @user` — Reset a user\'s balance to starting amount',
+      '`/bet delete <market_id>` — Delete a market and its message from the channel',
       '',
       '`/bet help` — Show this help message',
     ].join('\n'),
