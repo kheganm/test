@@ -2,6 +2,7 @@ const { getBalance, addBalance, getOrCreateUser } = require('../models/user');
 const { getActiveMarkets, getMarket } = require('../models/market');
 const { getUserBetsOnMarket } = require('../models/bet');
 const { createLoan, repayLoan, getActiveLoansForUser } = require('../models/loan');
+const { isAdmin } = require('../utils/permissions');
 const { buildCreateMarketModal } = require('../views/modals');
 const { buildLeaderboardMessage } = require('../views/leaderboard');
 const { buildMarketMessage } = require('../views/market-message');
@@ -278,6 +279,11 @@ async function handleLoans(command, respond) {
 }
 
 async function handleGive(command, args, respond) {
+  if (!isAdmin(command.user_id)) {
+    await respond({ response_type: 'ephemeral', text: ':no_entry: Only admins can use `/bet give`.' });
+    return;
+  }
+
   // Usage: /bet give @user 500
   const mentionMatch = command.text.match(/<@([A-Z0-9]+)\|?[^>]*>/);
   const amountStr = args[args.length - 1];
@@ -303,6 +309,11 @@ async function handleGive(command, args, respond) {
 }
 
 async function handleReset(command, args, respond) {
+  if (!isAdmin(command.user_id)) {
+    await respond({ response_type: 'ephemeral', text: ':no_entry: Only admins can use `/bet reset`.' });
+    return;
+  }
+
   // Usage: /bet reset @user  (resets to starting balance)
   const mentionMatch = command.text.match(/<@([A-Z0-9]+)\|?[^>]*>/);
 

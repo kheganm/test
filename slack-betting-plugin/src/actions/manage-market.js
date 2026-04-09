@@ -1,5 +1,6 @@
 const { createMarket, getMarket, setMessageTs, closeMarket, resolveMarket, cancelMarket } = require('../models/market');
 const { buildMarketMessage } = require('../views/market-message');
+const { isCreatorOrAdmin } = require('../utils/permissions');
 
 function registerManageMarketActions(app) {
   // Handle create market modal submission
@@ -32,7 +33,8 @@ function registerManageMarketActions(app) {
 
     await ack();
 
-    const marketId = createMarket(title, description, body.user.id, channelId, optionLabels);
+    const creatorId = body.user.id;
+    const marketId = createMarket(title, description, creatorId, channelId, optionLabels);
     const market = getMarket(marketId);
     const blocks = buildMarketMessage(market);
 
@@ -53,11 +55,11 @@ function registerManageMarketActions(app) {
     const market = getMarket(marketId);
 
     if (!market) return;
-    if (market.created_by !== body.user.id) {
+    if (!isCreatorOrAdmin(body.user.id, market.created_by)) {
       await client.chat.postEphemeral({
         channel: body.channel.id,
         user: body.user.id,
-        text: 'Only the market creator can close betting.',
+        text: ':no_entry: Only the market creator or an admin can close betting.',
       });
       return;
     }
@@ -87,11 +89,11 @@ function registerManageMarketActions(app) {
     const market = getMarket(marketId);
 
     if (!market) return;
-    if (market.created_by !== body.user.id) {
+    if (!isCreatorOrAdmin(body.user.id, market.created_by)) {
       await client.chat.postEphemeral({
         channel: body.channel.id,
         user: body.user.id,
-        text: 'Only the market creator can resolve this market.',
+        text: ':no_entry: Only the market creator or an admin can resolve this market.',
       });
       return;
     }
@@ -133,11 +135,11 @@ function registerManageMarketActions(app) {
     const market = getMarket(marketId);
 
     if (!market) return;
-    if (market.created_by !== body.user.id) {
+    if (!isCreatorOrAdmin(body.user.id, market.created_by)) {
       await client.chat.postEphemeral({
         channel: body.channel.id,
         user: body.user.id,
-        text: 'Only the market creator can cancel this market.',
+        text: ':no_entry: Only the market creator or an admin can cancel this market.',
       });
       return;
     }
