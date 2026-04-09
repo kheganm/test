@@ -1,7 +1,7 @@
 const { getLeaderboard } = require('../models/user');
 
-function buildLeaderboardMessage() {
-  const leaders = getLeaderboard(10);
+async function buildLeaderboardMessage() {
+  const leaders = await getLeaderboard(10);
 
   if (leaders.length === 0) {
     return [

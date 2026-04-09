@@ -8,8 +8,8 @@
     "dev": "node --watch src/app.js"
   },
   "dependencies": {
+    "@libsql/client": "^0.17.2",
     "@slack/bolt": "^4.1.0",
-    "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7"
   },
   "engines": {

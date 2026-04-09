@@ -1,89 +1,116 @@
 const { getDb } = require('../db');
 
-function createMarket(title, description, createdBy, channelId, optionLabels) {
+async function createMarket(title, description, createdBy, channelId, optionLabels, closeAt) {
   const db = getDb();
-  const insert = db.transaction(() => {
-    const result = db.prepare(
-      'INSERT INTO markets (title, description, created_by, channel_id) VALUES (?, ?, ?, ?)'
-    ).run(title, description, createdBy, channelId);
+  const tx = await db.transaction('write');
+  try {
+    const result = await tx.execute({
+      sql: 'INSERT INTO markets (title, description, created_by, channel_id, close_at) VALUES (?, ?, ?, ?, ?)',
+      args: [title, description, createdBy, channelId, closeAt || null],
+    });
+    const marketId = Number(result.lastInsertRowid);
 
-    const marketId = result.lastInsertRowid;
-    const insertOption = db.prepare('INSERT INTO options (market_id, label) VALUES (?, ?)');
     for (const label of optionLabels) {
-      insertOption.run(marketId, label);
+      await tx.execute({ sql: 'INSERT INTO options (market_id, label) VALUES (?, ?)', args: [marketId, label] });
     }
+    await tx.commit();
     return marketId;
-  });
-  return insert();
+  } catch (err) {
+    await tx.rollback();
+    throw err;
+  }
 }
 
-function getMarket(marketId) {
+async function getMarket(marketId) {
   const db = getDb();
-  const market = db.prepare('SELECT * FROM markets WHERE id = ?').get(marketId);
-  if (!market) return null;
-  market.options = db.prepare('SELECT * FROM options WHERE market_id = ?').all(marketId);
+  const marketResult = await db.execute({ sql: 'SELECT * FROM markets WHERE id = ?', args: [marketId] });
+  if (marketResult.rows.length === 0) return null;
+  const market = marketResult.rows[0];
+  const optionsResult = await db.execute({ sql: 'SELECT * FROM options WHERE market_id = ?', args: [marketId] });
+  market.options = optionsResult.rows;
   return market;
 }
 
-function getActiveMarkets(channelId) {
-  const db = getDb();
-  return db.prepare(
-    "SELECT * FROM markets WHERE channel_id = ? AND status IN ('open', 'closed') ORDER BY created_at DESC"
-  ).all(channelId);
+async function getActiveMarkets(channelId) {
+  const result = await getDb().execute({
+    sql: "SELECT * FROM markets WHERE channel_id = ? AND status IN ('open', 'closed') ORDER BY created_at DESC",
+    args: [channelId],
+  });
+  return result.rows;
 }
 
-function setMessageTs(marketId, messageTs) {
-  const db = getDb();
-  db.prepare('UPDATE markets SET message_ts = ? WHERE id = ?').run(messageTs, marketId);
+async function setMessageTs(marketId, messageTs) {
+  await getDb().execute({ sql: 'UPDATE markets SET message_ts = ? WHERE id = ?', args: [messageTs, marketId] });
 }
 
-function closeMarket(marketId) {
-  const db = getDb();
-  db.prepare("UPDATE markets SET status = 'closed', closed_at = datetime('now') WHERE id = ? AND status = 'open'").run(marketId);
+async function closeMarket(marketId) {
+  await getDb().execute({
+    sql: "UPDATE markets SET status = 'closed', closed_at = datetime('now') WHERE id = ? AND status = 'open'",
+    args: [marketId],
+  });
 }
 
-function resolveMarket(marketId, winningOptionId) {
+async function getMarketsToClose() {
+  const result = await getDb().execute({
+    sql: "SELECT * FROM markets WHERE status = 'open' AND close_at IS NOT NULL AND close_at <= datetime('now')",
+    args: [],
+  });
+  return result.rows;
+}
+
+async function resolveMarket(marketId, winningOptionId) {
   const db = getDb();
-  const resolve = db.transaction(() => {
-    db.prepare("UPDATE markets SET status = 'resolved', resolved_at = datetime('now') WHERE id = ?").run(marketId);
-    db.prepare('UPDATE options SET is_winner = 1 WHERE id = ? AND market_id = ?').run(winningOptionId, marketId);
+  const tx = await db.transaction('write');
+  try {
+    await tx.execute({ sql: "UPDATE markets SET status = 'resolved', resolved_at = datetime('now') WHERE id = ?", args: [marketId] });
+    await tx.execute({ sql: 'UPDATE options SET is_winner = 1 WHERE id = ? AND market_id = ?', args: [winningOptionId, marketId] });
 
-    // Calculate payouts
-    const totalPool = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM bets WHERE market_id = ?').get(marketId).total;
-    const winningPool = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM bets WHERE market_id = ? AND option_id = ?').get(marketId, winningOptionId).total;
+    const totalResult = await tx.execute({ sql: 'SELECT COALESCE(SUM(amount), 0) as total FROM bets WHERE market_id = ?', args: [marketId] });
+    const totalPool = Number(totalResult.rows[0].total);
 
-    if (winningPool === 0 || totalPool === 0) return [];
+    const winResult = await tx.execute({ sql: 'SELECT COALESCE(SUM(amount), 0) as total FROM bets WHERE market_id = ? AND option_id = ?', args: [marketId, winningOptionId] });
+    const winningPool = Number(winResult.rows[0].total);
 
-    // Get winning bets and distribute proportionally
-    const winningBets = db.prepare('SELECT * FROM bets WHERE market_id = ? AND option_id = ?').all(marketId, winningOptionId);
-    const updatePayout = db.prepare('UPDATE bets SET payout = ? WHERE id = ?');
-    const updateBalance = db.prepare('UPDATE users SET balance = balance + ? WHERE slack_id = ?');
+    if (winningPool === 0 || totalPool === 0) {
+      await tx.commit();
+      return [];
+    }
 
+    const betsResult = await tx.execute({ sql: 'SELECT * FROM bets WHERE market_id = ? AND option_id = ?', args: [marketId, winningOptionId] });
     const payouts = [];
-    for (const bet of winningBets) {
-      const payout = Math.floor((bet.amount / winningPool) * totalPool);
-      updatePayout.run(payout, bet.id);
-      updateBalance.run(payout, bet.slack_id);
-      payouts.push({ slackId: bet.slack_id, amount: bet.amount, payout });
+
+    for (const bet of betsResult.rows) {
+      const payout = Math.floor((Number(bet.amount) / winningPool) * totalPool);
+      await tx.execute({ sql: 'UPDATE bets SET payout = ? WHERE id = ?', args: [payout, bet.id] });
+      await tx.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE slack_id = ?', args: [payout, bet.slack_id] });
+      payouts.push({ slackId: bet.slack_id, amount: Number(bet.amount), payout });
     }
+
+    await tx.commit();
     return payouts;
-  });
-  return resolve();
+  } catch (err) {
+    await tx.rollback();
+    throw err;
+  }
 }
 
-function cancelMarket(marketId) {
+async function cancelMarket(marketId) {
   const db = getDb();
-  const cancel = db.transaction(() => {
-    db.prepare("UPDATE markets SET status = 'cancelled' WHERE id = ?").run(marketId);
-    // Refund all bets
-    const bets = db.prepare('SELECT * FROM bets WHERE market_id = ?').all(marketId);
-    const updateBalance = db.prepare('UPDATE users SET balance = balance + ? WHERE slack_id = ?');
-    for (const bet of bets) {
-      updateBalance.run(bet.amount, bet.slack_id);
+  const tx = await db.transaction('write');
+  try {
+    await tx.execute({ sql: "UPDATE markets SET status = 'cancelled' WHERE id = ?", args: [marketId] });
+    const betsResult = await tx.execute({ sql: 'SELECT * FROM bets WHERE market_id = ?', args: [marketId] });
+
+    for (const bet of betsResult.rows) {
+      await tx.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE slack_id = ?', args: [bet.amount, bet.slack_id] });
     }
-    return bets;
-  });
-  return cancel();
+
+    await tx.commit();
+    return betsResult.rows;
+  } catch (err) {
+    await tx.rollback();
+    throw err;
+  }
 }
 
-module.exports = { createMarket, getMarket, getActiveMarkets, setMessageTs, closeMarket, resolveMarket, cancelMarket };
+module.exports = { createMarket, getMarket, getActiveMarkets, setMessageTs, closeMarket, getMarketsToClose, resolveMarket, cancelMarket };

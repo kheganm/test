@@ -8,9 +8,9 @@ const STATUS_EMOJI = {
   cancelled: ':no_entry_sign:',
 };
 
-function buildMarketMessage(market) {
-  const pools = getPoolByOption(market.id);
-  const totalPool = getTotalPool(market.id);
+async function buildMarketMessage(market) {
+  const pools = await getPoolByOption(market.id);
+  const totalPool = await getTotalPool(market.id);
   const poolMap = {};
   for (const p of pools) {
     poolMap[p.option_id] = p;
@@ -19,47 +19,47 @@ function buildMarketMessage(market) {
   const statusEmoji = STATUS_EMOJI[market.status] || ':grey_question:';
   const blocks = [];
 
-  // Header
   blocks.push({
     type: 'header',
     text: { type: 'plain_text', text: `${market.title}`, emoji: true },
   });
 
-  // Status & info
+  let statusText = `${statusEmoji} *Status:* ${market.status.toUpperCase()}  |  :moneybag: *Total Pool:* ${totalPool} coins`;
+  if (market.close_at && market.status === 'open') {
+    statusText += `\n:alarm_clock: *Betting closes:* <!date^${Math.floor(new Date(market.close_at + 'Z').getTime() / 1000)}^{date_short_pretty} at {time}|${market.close_at}>`;
+  }
+  if (market.description) statusText += `\n${market.description}`;
+
   blocks.push({
     type: 'section',
-    text: {
-      type: 'mrkdwn',
-      text: `${statusEmoji} *Status:* ${market.status.toUpperCase()}  |  :moneybag: *Total Pool:* ${totalPool} coins${market.description ? `\n${market.description}` : ''}`,
-    },
+    text: { type: 'mrkdwn', text: statusText },
   });
 
   blocks.push({ type: 'divider' });
 
-  // Options with odds
   for (const option of market.options) {
     const pool = poolMap[option.id] || { pool: 0, num_bets: 0 };
-    const odds = calculateOdds(pool.pool, totalPool);
-    const percentage = totalPool > 0 ? ((pool.pool / totalPool) * 100).toFixed(1) : '0.0';
-    const progressBar = buildProgressBar(totalPool > 0 ? pool.pool / totalPool : 0);
-
+    const poolAmount = Number(pool.pool);
+    const numBets = Number(pool.num_bets);
+    const odds = calculateOdds(poolAmount, totalPool);
+    const percentage = totalPool > 0 ? ((poolAmount / totalPool) * 100).toFixed(1) : '0.0';
+    const progressBar = buildProgressBar(totalPool > 0 ? poolAmount / totalPool : 0);
     const winnerTag = option.is_winner ? ' :trophy: *WINNER*' : '';
 
     const sectionBlock = {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*${option.label}*${winnerTag}\n${progressBar} ${percentage}%\nPool: ${pool.pool} coins  |  Odds: ${formatOdds(odds)}  |  ${pool.num_bets} bet(s)`,
+        text: `*${option.label}*${winnerTag}\n${progressBar} ${percentage}%\nPool: ${poolAmount} coins  |  Odds: ${formatOdds(odds)}  |  ${numBets} bet(s)`,
       },
     };
 
-    // Add bet button only if market is open
     if (market.status === 'open') {
       sectionBlock.accessory = {
         type: 'button',
         text: { type: 'plain_text', text: `Bet on this`, emoji: true },
-        action_id: `place_bet_${option.id}`,
-        value: JSON.stringify({ marketId: market.id, optionId: option.id }),
+        action_id: `place_bet_${market.id}_${option.id}`,
+        value: JSON.stringify({ marketId: Number(market.id), optionId: Number(option.id) }),
         style: 'primary',
       };
     }
@@ -69,7 +69,6 @@ function buildMarketMessage(market) {
 
   blocks.push({ type: 'divider' });
 
-  // Admin actions
   if (market.status === 'open') {
     blocks.push({
       type: 'actions',
@@ -77,14 +76,14 @@ function buildMarketMessage(market) {
         {
           type: 'button',
           text: { type: 'plain_text', text: ':lock: Close Betting', emoji: true },
-          action_id: 'close_market',
+          action_id: `close_market_${market.id}`,
           value: String(market.id),
           style: 'danger',
         },
         {
           type: 'button',
           text: { type: 'plain_text', text: ':x: Cancel Market', emoji: true },
-          action_id: 'cancel_market',
+          action_id: `cancel_market_${market.id}`,
           value: String(market.id),
         },
       ],
@@ -93,8 +92,8 @@ function buildMarketMessage(market) {
     const resolveButtons = market.options.map((option) => ({
       type: 'button',
       text: { type: 'plain_text', text: `:trophy: ${option.label} wins`, emoji: true },
-      action_id: `resolve_market_${option.id}`,
-      value: JSON.stringify({ marketId: market.id, optionId: option.id }),
+      action_id: `resolve_market_${market.id}_${option.id}`,
+      value: JSON.stringify({ marketId: Number(market.id), optionId: Number(option.id) }),
       style: 'primary',
     }));
     blocks.push({
@@ -103,7 +102,6 @@ function buildMarketMessage(market) {
     });
   }
 
-  // Footer
   blocks.push({
     type: 'context',
     elements: [

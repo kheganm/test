@@ -1,44 +1,44 @@
 const { getDb } = require('../db');
 const { deductBalance } = require('./user');
 
-function placeBet(slackId, marketId, optionId, amount) {
+async function placeBet(slackId, marketId, optionId, amount) {
   const db = getDb();
-  const market = db.prepare('SELECT * FROM markets WHERE id = ?').get(marketId);
-  if (!market) throw new Error('Market not found.');
-  if (market.status !== 'open') throw new Error('This market is no longer accepting bets.');
+  const marketResult = await db.execute({ sql: 'SELECT * FROM markets WHERE id = ?', args: [marketId] });
+  if (marketResult.rows.length === 0) throw new Error('Market not found.');
+  if (marketResult.rows[0].status !== 'open') throw new Error('This market is no longer accepting bets.');
 
-  const option = db.prepare('SELECT * FROM options WHERE id = ? AND market_id = ?').get(optionId, marketId);
-  if (!option) throw new Error('Invalid option.');
+  const optionResult = await db.execute({ sql: 'SELECT * FROM options WHERE id = ? AND market_id = ?', args: [optionId, marketId] });
+  if (optionResult.rows.length === 0) throw new Error('Invalid option.');
 
-  deductBalance(slackId, amount);
-  db.prepare('INSERT INTO bets (slack_id, market_id, option_id, amount) VALUES (?, ?, ?, ?)').run(slackId, marketId, optionId, amount);
+  await deductBalance(slackId, amount);
+  await db.execute({
+    sql: 'INSERT INTO bets (slack_id, market_id, option_id, amount) VALUES (?, ?, ?, ?)',
+    args: [slackId, marketId, optionId, amount],
+  });
 }
 
-function getMarketBets(marketId) {
-  const db = getDb();
-  return db.prepare('SELECT * FROM bets WHERE market_id = ?').all(marketId);
+async function getPoolByOption(marketId) {
+  const result = await getDb().execute({
+    sql: 'SELECT option_id, COALESCE(SUM(amount), 0) as pool, COUNT(*) as num_bets FROM bets WHERE market_id = ? GROUP BY option_id',
+    args: [marketId],
+  });
+  return result.rows;
 }
 
-function getPoolByOption(marketId) {
-  const db = getDb();
-  return db.prepare(`
-    SELECT option_id, COALESCE(SUM(amount), 0) as pool, COUNT(*) as num_bets
-    FROM bets WHERE market_id = ? GROUP BY option_id
-  `).all(marketId);
+async function getTotalPool(marketId) {
+  const result = await getDb().execute({
+    sql: 'SELECT COALESCE(SUM(amount), 0) as total FROM bets WHERE market_id = ?',
+    args: [marketId],
+  });
+  return Number(result.rows[0].total);
 }
 
-function getTotalPool(marketId) {
-  const db = getDb();
-  return db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM bets WHERE market_id = ?').get(marketId).total;
+async function getUserBetsOnMarket(slackId, marketId) {
+  const result = await getDb().execute({
+    sql: 'SELECT b.*, o.label as option_label FROM bets b JOIN options o ON b.option_id = o.id WHERE b.slack_id = ? AND b.market_id = ?',
+    args: [slackId, marketId],
+  });
+  return result.rows;
 }
 
-function getUserBetsOnMarket(slackId, marketId) {
-  const db = getDb();
-  return db.prepare(`
-    SELECT b.*, o.label as option_label
-    FROM bets b JOIN options o ON b.option_id = o.id
-    WHERE b.slack_id = ? AND b.market_id = ?
-  `).all(slackId, marketId);
-}
-
-module.exports = { placeBet, getMarketBets, getPoolByOption, getTotalPool, getUserBetsOnMarket };
+module.exports = { placeBet, getPoolByOption, getTotalPool, getUserBetsOnMarket };

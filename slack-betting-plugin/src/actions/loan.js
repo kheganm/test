@@ -2,12 +2,11 @@ const { getLoan, acceptLoan, declineLoan } = require('../models/loan');
 const { getBalance } = require('../models/user');
 
 function registerLoanActions(app) {
-  // Accept loan button
   app.action(/^accept_loan_\d+$/, async ({ action, ack, client, body }) => {
     await ack();
 
     const loanId = parseInt(action.value, 10);
-    const loan = getLoan(loanId);
+    const loan = await getLoan(loanId);
 
     if (!loan) return;
     if (loan.borrower_id !== body.user.id) {
@@ -29,10 +28,8 @@ function registerLoanActions(app) {
     }
 
     try {
-      acceptLoan(loanId);
-      const borrowerBalance = getBalance(loan.borrower_id);
+      await acceptLoan(loanId);
 
-      // Update the offer message
       await client.chat.update({
         channel: loan.channel_id,
         ts: loan.message_ts,
@@ -56,12 +53,11 @@ function registerLoanActions(app) {
     }
   });
 
-  // Decline loan button
   app.action(/^decline_loan_\d+$/, async ({ action, ack, client, body }) => {
     await ack();
 
     const loanId = parseInt(action.value, 10);
-    const loan = getLoan(loanId);
+    const loan = await getLoan(loanId);
 
     if (!loan) return;
     if (loan.borrower_id !== body.user.id) {
@@ -73,7 +69,7 @@ function registerLoanActions(app) {
       return;
     }
 
-    declineLoan(loanId);
+    await declineLoan(loanId);
 
     await client.chat.update({
       channel: loan.channel_id,

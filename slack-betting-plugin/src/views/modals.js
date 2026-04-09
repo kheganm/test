@@ -40,6 +40,28 @@ function buildCreateMarketModal(channelId) {
           placeholder: { type: 'plain_text', text: 'Team A\nTeam B\nDraw' },
         },
       },
+      {
+        type: 'input',
+        block_id: 'close_date_block',
+        label: { type: 'plain_text', text: 'Betting closes on (date)' },
+        optional: true,
+        element: {
+          type: 'datepicker',
+          action_id: 'close_date_input',
+          placeholder: { type: 'plain_text', text: 'Pick a date' },
+        },
+      },
+      {
+        type: 'input',
+        block_id: 'close_time_block',
+        label: { type: 'plain_text', text: 'Betting closes at (time)' },
+        optional: true,
+        element: {
+          type: 'timepicker',
+          action_id: 'close_time_input',
+          placeholder: { type: 'plain_text', text: 'Pick a time' },
+        },
+      },
     ],
   };
 }

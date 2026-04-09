@@ -10,6 +10,16 @@ function registerManageMarketActions(app) {
     const description = view.state.values.description_block?.description_input?.value || '';
     const optionsText = view.state.values.options_block.options_input.value;
 
+    // Get close date/time
+    const closeDate = view.state.values.close_date_block?.close_date_input?.selected_date || null;
+    const closeTime = view.state.values.close_time_block?.close_time_input?.selected_time || null;
+    let closeAt = null;
+    if (closeDate && closeTime) {
+      closeAt = `${closeDate} ${closeTime}:00`;
+    } else if (closeDate) {
+      closeAt = `${closeDate} 23:59:00`;
+    }
+
     const optionLabels = optionsText
       .split('\n')
       .map((l) => l.trim())
@@ -34,9 +44,9 @@ function registerManageMarketActions(app) {
     await ack();
 
     const creatorId = body.user.id;
-    const marketId = createMarket(title, description, creatorId, channelId, optionLabels);
-    const market = getMarket(marketId);
-    const blocks = buildMarketMessage(market);
+    const marketId = await createMarket(title, description, creatorId, channelId, optionLabels, closeAt);
+    const market = await getMarket(marketId);
+    const blocks = await buildMarketMessage(market);
 
     const result = await client.chat.postMessage({
       channel: channelId,
@@ -44,15 +54,15 @@ function registerManageMarketActions(app) {
       text: `New betting market: ${title}`,
     });
 
-    setMessageTs(marketId, result.ts);
+    await setMessageTs(marketId, result.ts);
   });
 
-  // Close market (stop accepting bets)
-  app.action('close_market', async ({ action, ack, client, body }) => {
+  // Close market (stop accepting bets) — action_id includes market ID now
+  app.action(/^close_market_\d+$/, async ({ action, ack, client, body }) => {
     await ack();
 
     const marketId = parseInt(action.value, 10);
-    const market = getMarket(marketId);
+    const market = await getMarket(marketId);
 
     if (!market) return;
     if (!isCreatorOrAdmin(body.user.id, market.created_by)) {
@@ -64,9 +74,9 @@ function registerManageMarketActions(app) {
       return;
     }
 
-    closeMarket(marketId);
-    const updated = getMarket(marketId);
-    const blocks = buildMarketMessage(updated);
+    await closeMarket(marketId);
+    const updated = await getMarket(marketId);
+    const blocks = await buildMarketMessage(updated);
 
     await client.chat.update({
       channel: updated.channel_id,
@@ -81,12 +91,12 @@ function registerManageMarketActions(app) {
     });
   });
 
-  // Resolve market — pick a winner
-  app.action(/^resolve_market_\d+$/, async ({ action, ack, client, body }) => {
+  // Resolve market — action_id includes both market ID and option ID
+  app.action(/^resolve_market_\d+_\d+$/, async ({ action, ack, client, body }) => {
     await ack();
 
     const { marketId, optionId } = JSON.parse(action.value);
-    const market = getMarket(marketId);
+    const market = await getMarket(marketId);
 
     if (!market) return;
     if (!isCreatorOrAdmin(body.user.id, market.created_by)) {
@@ -98,10 +108,10 @@ function registerManageMarketActions(app) {
       return;
     }
 
-    const payouts = resolveMarket(marketId, optionId);
-    const updated = getMarket(marketId);
-    const winner = updated.options.find((o) => o.id === optionId);
-    const blocks = buildMarketMessage(updated);
+    const payouts = await resolveMarket(marketId, optionId);
+    const updated = await getMarket(marketId);
+    const winner = updated.options.find((o) => Number(o.id) === optionId);
+    const blocks = await buildMarketMessage(updated);
 
     await client.chat.update({
       channel: updated.channel_id,
@@ -110,7 +120,6 @@ function registerManageMarketActions(app) {
       text: updated.title,
     });
 
-    // Announce results
     let resultText = `:checkered_flag: *${updated.title}* has been resolved!\n:trophy: Winner: *${winner.label}*\n\n`;
     if (payouts.length === 0) {
       resultText += '_No winning bets — the house keeps the pool!_';
@@ -127,12 +136,12 @@ function registerManageMarketActions(app) {
     });
   });
 
-  // Cancel market — refund all bets
-  app.action('cancel_market', async ({ action, ack, client, body }) => {
+  // Cancel market — action_id includes market ID
+  app.action(/^cancel_market_\d+$/, async ({ action, ack, client, body }) => {
     await ack();
 
     const marketId = parseInt(action.value, 10);
-    const market = getMarket(marketId);
+    const market = await getMarket(marketId);
 
     if (!market) return;
     if (!isCreatorOrAdmin(body.user.id, market.created_by)) {
@@ -144,9 +153,9 @@ function registerManageMarketActions(app) {
       return;
     }
 
-    const refunds = cancelMarket(marketId);
-    const updated = getMarket(marketId);
-    const blocks = buildMarketMessage(updated);
+    const refunds = await cancelMarket(marketId);
+    const updated = await getMarket(marketId);
+    const blocks = await buildMarketMessage(updated);
 
     await client.chat.update({
       channel: updated.channel_id,

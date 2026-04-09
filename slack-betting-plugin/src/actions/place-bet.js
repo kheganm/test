@@ -6,11 +6,11 @@ const { buildMarketMessage } = require('../views/market-message');
 
 function registerPlaceBetActions(app) {
   // Handle "Bet on this" button clicks — opens the bet modal
-  app.action(/^place_bet_\d+$/, async ({ action, ack, client, body }) => {
+  app.action(/^place_bet_\d+_\d+$/, async ({ action, ack, client, body }) => {
     await ack();
 
     const { marketId, optionId } = JSON.parse(action.value);
-    const market = getMarket(marketId);
+    const market = await getMarket(marketId);
     if (!market || market.status !== 'open') {
       await client.chat.postEphemeral({
         channel: body.channel.id,
@@ -20,8 +20,8 @@ function registerPlaceBetActions(app) {
       return;
     }
 
-    const option = market.options.find((o) => o.id === optionId);
-    const balance = getBalance(body.user.id);
+    const option = market.options.find((o) => Number(o.id) === optionId);
+    const balance = await getBalance(body.user.id);
 
     await client.views.open({
       trigger_id: body.trigger_id,
@@ -44,13 +44,12 @@ function registerPlaceBetActions(app) {
     }
 
     try {
-      placeBet(body.user.id, marketId, optionId, amount);
+      await placeBet(body.user.id, marketId, optionId, amount);
       await ack();
 
-      // Update the live market message
-      const market = getMarket(marketId);
+      const market = await getMarket(marketId);
       if (market && market.message_ts) {
-        const blocks = buildMarketMessage(market);
+        const blocks = await buildMarketMessage(market);
         await client.chat.update({
           channel: market.channel_id,
           ts: market.message_ts,
@@ -59,11 +58,10 @@ function registerPlaceBetActions(app) {
         });
       }
 
-      // Confirm to the user
       await client.chat.postEphemeral({
         channel: market.channel_id,
         user: body.user.id,
-        text: `:white_check_mark: Bet placed! You wagered *${amount} coins* on *${market.options.find((o) => o.id === optionId)?.label}*.`,
+        text: `:white_check_mark: Bet placed! You wagered *${amount} coins* on *${market.options.find((o) => Number(o.id) === optionId)?.label}*.`,
       });
     } catch (err) {
       await ack({

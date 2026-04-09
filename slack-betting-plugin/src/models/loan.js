@@ -1,80 +1,92 @@
 const { getDb } = require('../db');
 const { getOrCreateUser, deductBalance, addBalance } = require('./user');
 
-function createLoan(lenderId, borrowerId, amount, interestRate, channelId) {
+async function createLoan(lenderId, borrowerId, amount, interestRate, channelId) {
   const db = getDb();
-  getOrCreateUser(lenderId);
-  getOrCreateUser(borrowerId);
+  await getOrCreateUser(lenderId);
+  await getOrCreateUser(borrowerId);
 
-  const lender = db.prepare('SELECT * FROM users WHERE slack_id = ?').get(lenderId);
-  if (lender.balance < amount) {
-    throw new Error(`You only have ${lender.balance} coins — can't lend ${amount}.`);
+  const lenderResult = await db.execute({ sql: 'SELECT * FROM users WHERE slack_id = ?', args: [lenderId] });
+  if (Number(lenderResult.rows[0].balance) < amount) {
+    throw new Error(`You only have ${lenderResult.rows[0].balance} coins — can't lend ${amount}.`);
   }
 
   const totalOwed = Math.ceil(amount * (1 + interestRate / 100));
-
-  const result = db.prepare(
-    'INSERT INTO loans (lender_id, borrower_id, amount, interest_rate, total_owed, channel_id) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(lenderId, borrowerId, amount, interestRate, totalOwed, channelId);
-
-  return getLoan(result.lastInsertRowid);
+  const result = await db.execute({
+    sql: 'INSERT INTO loans (lender_id, borrower_id, amount, interest_rate, total_owed, channel_id) VALUES (?, ?, ?, ?, ?, ?)',
+    args: [lenderId, borrowerId, amount, interestRate, totalOwed, channelId],
+  });
+  return getLoan(Number(result.lastInsertRowid));
 }
 
-function getLoan(loanId) {
-  const db = getDb();
-  return db.prepare('SELECT * FROM loans WHERE id = ?').get(loanId);
+async function getLoan(loanId) {
+  const result = await getDb().execute({ sql: 'SELECT * FROM loans WHERE id = ?', args: [loanId] });
+  return result.rows[0] || null;
 }
 
-function acceptLoan(loanId) {
+async function acceptLoan(loanId) {
   const db = getDb();
-  const loan = getLoan(loanId);
+  const loan = await getLoan(loanId);
   if (!loan || loan.status !== 'pending') return null;
 
-  const accept = db.transaction(() => {
-    deductBalance(loan.lender_id, loan.amount);
-    addBalance(loan.borrower_id, loan.amount);
-    db.prepare("UPDATE loans SET status = 'active', accepted_at = datetime('now') WHERE id = ?").run(loanId);
-  });
-  accept();
+  const tx = await db.transaction('write');
+  try {
+    const lenderResult = await tx.execute({ sql: 'SELECT balance FROM users WHERE slack_id = ?', args: [loan.lender_id] });
+    if (Number(lenderResult.rows[0].balance) < Number(loan.amount)) {
+      throw new Error('Lender no longer has enough coins for this loan.');
+    }
+    await tx.execute({ sql: 'UPDATE users SET balance = balance - ? WHERE slack_id = ?', args: [loan.amount, loan.lender_id] });
+    await tx.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE slack_id = ?', args: [loan.amount, loan.borrower_id] });
+    await tx.execute({ sql: "UPDATE loans SET status = 'active', accepted_at = datetime('now') WHERE id = ?", args: [loanId] });
+    await tx.commit();
+  } catch (err) {
+    await tx.rollback();
+    throw err;
+  }
   return getLoan(loanId);
 }
 
-function declineLoan(loanId) {
-  const db = getDb();
-  db.prepare("UPDATE loans SET status = 'declined' WHERE id = ? AND status = 'pending'").run(loanId);
+async function declineLoan(loanId) {
+  await getDb().execute({ sql: "UPDATE loans SET status = 'declined' WHERE id = ? AND status = 'pending'", args: [loanId] });
   return getLoan(loanId);
 }
 
-function repayLoan(loanId, borrowerId) {
-  const db = getDb();
-  const loan = getLoan(loanId);
+async function repayLoan(loanId, borrowerId) {
+  const loan = await getLoan(loanId);
   if (!loan) throw new Error('Loan not found.');
   if (loan.status !== 'active') throw new Error('This loan is not active.');
   if (loan.borrower_id !== borrowerId) throw new Error("This isn't your loan to repay.");
 
-  const borrower = db.prepare('SELECT * FROM users WHERE slack_id = ?').get(borrowerId);
-  if (borrower.balance < loan.total_owed) {
-    throw new Error(`You need ${loan.total_owed} coins to repay but only have ${borrower.balance}.`);
+  const borrowerResult = await getDb().execute({ sql: 'SELECT balance FROM users WHERE slack_id = ?', args: [borrowerId] });
+  if (Number(borrowerResult.rows[0].balance) < Number(loan.total_owed)) {
+    throw new Error(`You need ${loan.total_owed} coins to repay but only have ${borrowerResult.rows[0].balance}.`);
   }
 
-  const repay = db.transaction(() => {
-    deductBalance(loan.borrower_id, loan.total_owed);
-    addBalance(loan.lender_id, loan.total_owed);
-    db.prepare("UPDATE loans SET status = 'repaid', repaid_at = datetime('now') WHERE id = ?").run(loanId);
-  });
-  repay();
+  const db = getDb();
+  const tx = await db.transaction('write');
+  try {
+    await tx.execute({ sql: 'UPDATE users SET balance = balance - ? WHERE slack_id = ?', args: [loan.total_owed, loan.borrower_id] });
+    await tx.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE slack_id = ?', args: [loan.total_owed, loan.lender_id] });
+    await tx.execute({ sql: "UPDATE loans SET status = 'repaid', repaid_at = datetime('now') WHERE id = ?", args: [loanId] });
+    await tx.commit();
+  } catch (err) {
+    await tx.rollback();
+    throw err;
+  }
   return getLoan(loanId);
 }
 
-function getActiveLoansForUser(slackId) {
+async function getActiveLoansForUser(slackId) {
   const db = getDb();
-  const given = db.prepare(
-    "SELECT * FROM loans WHERE lender_id = ? AND status IN ('pending', 'active') ORDER BY created_at DESC"
-  ).all(slackId);
-  const received = db.prepare(
-    "SELECT * FROM loans WHERE borrower_id = ? AND status IN ('pending', 'active') ORDER BY created_at DESC"
-  ).all(slackId);
-  return { given, received };
+  const givenResult = await db.execute({
+    sql: "SELECT * FROM loans WHERE lender_id = ? AND status IN ('pending', 'active') ORDER BY created_at DESC",
+    args: [slackId],
+  });
+  const receivedResult = await db.execute({
+    sql: "SELECT * FROM loans WHERE borrower_id = ? AND status IN ('pending', 'active') ORDER BY created_at DESC",
+    args: [slackId],
+  });
+  return { given: givenResult.rows, received: receivedResult.rows };
 }
 
 module.exports = { createLoan, getLoan, acceptLoan, declineLoan, repayLoan, getActiveLoansForUser };

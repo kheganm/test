@@ -1,10 +1,12 @@
 require('dotenv').config();
 
 const { App } = require('@slack/bolt');
+const { migrate } = require('./db');
 const { registerBetCommand } = require('./commands/bet');
 const { registerPlaceBetActions } = require('./actions/place-bet');
 const { registerManageMarketActions } = require('./actions/manage-market');
 const { registerLoanActions } = require('./actions/loan');
+const { startScheduler } = require('./scheduler');
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -21,6 +23,8 @@ registerManageMarketActions(app);
 registerLoanActions(app);
 
 (async () => {
+  await migrate();
   await app.start();
+  startScheduler(app);
   console.log('Betting Bot is running!');
 })();

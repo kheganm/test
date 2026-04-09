@@ -6,7 +6,6 @@ const { isAdmin } = require('../utils/permissions');
 const { resolveUserId } = require('../utils/resolve-user');
 const { buildCreateMarketModal } = require('../views/modals');
 const { buildLeaderboardMessage } = require('../views/leaderboard');
-const { buildMarketMessage } = require('../views/market-message');
 
 function registerBetCommand(app) {
   app.command('/bet', async ({ command, ack, respond, client }) => {
@@ -66,7 +65,7 @@ async function handleCreate(command, client) {
 }
 
 async function handleBalance(command, respond) {
-  const balance = getBalance(command.user_id);
+  const balance = await getBalance(command.user_id);
   await respond({
     response_type: 'ephemeral',
     text: `:coin: Your balance: *${balance} coins*`,
@@ -74,7 +73,7 @@ async function handleBalance(command, respond) {
 }
 
 async function handleLeaderboard(command, respond) {
-  const blocks = buildLeaderboardMessage();
+  const blocks = await buildLeaderboardMessage();
   await respond({
     response_type: 'in_channel',
     blocks,
@@ -83,7 +82,7 @@ async function handleLeaderboard(command, respond) {
 }
 
 async function handleMarkets(command, respond) {
-  const markets = getActiveMarkets(command.channel_id);
+  const markets = await getActiveMarkets(command.channel_id);
   if (markets.length === 0) {
     await respond({
       response_type: 'ephemeral',
@@ -113,13 +112,13 @@ async function handleMyBets(command, args, respond) {
     return;
   }
 
-  const market = getMarket(marketId);
+  const market = await getMarket(marketId);
   if (!market) {
     await respond({ response_type: 'ephemeral', text: 'Market not found.' });
     return;
   }
 
-  const bets = getUserBetsOnMarket(command.user_id, marketId);
+  const bets = await getUserBetsOnMarket(command.user_id, marketId);
   if (bets.length === 0) {
     await respond({
       response_type: 'ephemeral',
@@ -128,7 +127,7 @@ async function handleMyBets(command, args, respond) {
     return;
   }
 
-  const total = bets.reduce((sum, b) => sum + b.amount, 0);
+  const total = bets.reduce((sum, b) => sum + Number(b.amount), 0);
   const lines = bets.map((b) => `• ${b.option_label}: ${b.amount} coins`);
 
   await respond({
@@ -138,9 +137,7 @@ async function handleMyBets(command, args, respond) {
 }
 
 async function handleLoan(command, args, respond, client) {
-  // Usage: /bet loan @user 500 10
   const borrowerId = await resolveUserId(command.text, client);
-  // Find the numbers in the text: amount and interest rate
   const numbers = command.text.match(/\b(\d+)\b/g);
 
   if (!borrowerId || !numbers || numbers.length < 2) {
@@ -170,9 +167,8 @@ async function handleLoan(command, args, respond, client) {
   }
 
   try {
-    const loan = createLoan(command.user_id, borrowerId, amount, interestRate, command.channel_id);
+    const loan = await createLoan(command.user_id, borrowerId, amount, interestRate, command.channel_id);
 
-    // Post the loan offer to the channel with accept/decline buttons
     const result = await client.chat.postMessage({
       channel: command.channel_id,
       blocks: [
@@ -217,9 +213,7 @@ async function handleLoan(command, args, respond, client) {
       text: `Loan offer from <@${command.user_id}> to <@${borrowerId}>`,
     });
 
-    // Save the message timestamp so we can update it later
-    const { getDb } = require('../db');
-    getDb().prepare('UPDATE loans SET message_ts = ? WHERE id = ?').run(result.ts, loan.id);
+    await getDb().execute({ sql: 'UPDATE loans SET message_ts = ? WHERE id = ?', args: [result.ts, loan.id] });
   } catch (err) {
     await respond({ response_type: 'ephemeral', text: `:x: ${err.message}` });
   }
@@ -236,7 +230,7 @@ async function handleRepay(command, args, respond) {
   }
 
   try {
-    const loan = repayLoan(loanId, command.user_id);
+    const loan = await repayLoan(loanId, command.user_id);
     await respond({
       response_type: 'in_channel',
       text: `:white_check_mark: <@${command.user_id}> repaid *${loan.total_owed} coins* to <@${loan.lender_id}> (Loan #${loan.id}). Debt cleared!`,
@@ -247,7 +241,7 @@ async function handleRepay(command, args, respond) {
 }
 
 async function handleLoans(command, respond) {
-  const { given, received } = getActiveLoansForUser(command.user_id);
+  const { given, received } = await getActiveLoansForUser(command.user_id);
 
   if (given.length === 0 && received.length === 0) {
     await respond({
@@ -288,7 +282,6 @@ async function handleGive(command, args, respond, client) {
     return;
   }
 
-  // Usage: /bet give @user 500
   const targetUserId = await resolveUserId(command.text, client);
   const amountStr = args[args.length - 1];
   const amount = parseInt(amountStr, 10);
@@ -301,9 +294,9 @@ async function handleGive(command, args, respond, client) {
     return;
   }
 
-  getOrCreateUser(targetUserId);
-  addBalance(targetUserId, amount);
-  const newBalance = getBalance(targetUserId);
+  await getOrCreateUser(targetUserId);
+  await addBalance(targetUserId, amount);
+  const newBalance = await getBalance(targetUserId);
 
   await respond({
     response_type: 'ephemeral',
@@ -317,7 +310,6 @@ async function handleReset(command, args, respond, client) {
     return;
   }
 
-  // Usage: /bet reset @user  (resets to starting balance)
   const targetUserId = await resolveUserId(command.text, client);
 
   if (!targetUserId) {
@@ -327,16 +319,9 @@ async function handleReset(command, args, respond, client) {
     });
     return;
   }
-  const startingBalance = parseInt(process.env.STARTING_BALANCE || '1000', 10);
-  const currentBalance = getBalance(targetUserId);
-  const diff = startingBalance - currentBalance;
 
-  if (diff > 0) {
-    addBalance(targetUserId, diff);
-  } else if (diff < 0) {
-    const { getDb } = require('../db');
-    getDb().prepare('UPDATE users SET balance = ? WHERE slack_id = ?').run(startingBalance, targetUserId);
-  }
+  const startingBalance = parseInt(process.env.STARTING_BALANCE || '1000', 10);
+  await getDb().execute({ sql: 'UPDATE users SET balance = ? WHERE slack_id = ?', args: [startingBalance, targetUserId] });
 
   await respond({
     response_type: 'ephemeral',
@@ -349,7 +334,7 @@ async function handleHelp(respond) {
     response_type: 'ephemeral',
     text: [
       '*Betting Bot Commands:*',
-      '`/bet create` — Create a new betting market',
+      '`/bet create` — Create a new betting market (with optional close date/time)',
       '`/bet balance` — Check your coin balance',
       '`/bet markets` — List active markets in this channel',
       '`/bet mybets <market_id>` — View your bets on a market',
@@ -368,5 +353,7 @@ async function handleHelp(respond) {
     ].join('\n'),
   });
 }
+
+const { getDb } = require('../db');
 
 module.exports = { registerBetCommand };

@@ -2,39 +2,37 @@ const { getDb } = require('../db');
 
 const STARTING_BALANCE = parseInt(process.env.STARTING_BALANCE || '1000', 10);
 
-function getOrCreateUser(slackId) {
+async function getOrCreateUser(slackId) {
   const db = getDb();
-  let user = db.prepare('SELECT * FROM users WHERE slack_id = ?').get(slackId);
-  if (!user) {
-    db.prepare('INSERT INTO users (slack_id, balance) VALUES (?, ?)').run(slackId, STARTING_BALANCE);
-    user = db.prepare('SELECT * FROM users WHERE slack_id = ?').get(slackId);
+  let result = await db.execute({ sql: 'SELECT * FROM users WHERE slack_id = ?', args: [slackId] });
+  if (result.rows.length === 0) {
+    await db.execute({ sql: 'INSERT INTO users (slack_id, balance) VALUES (?, ?)', args: [slackId, STARTING_BALANCE] });
+    result = await db.execute({ sql: 'SELECT * FROM users WHERE slack_id = ?', args: [slackId] });
   }
-  return user;
+  return result.rows[0];
 }
 
-function getBalance(slackId) {
-  const user = getOrCreateUser(slackId);
-  return user.balance;
+async function getBalance(slackId) {
+  const user = await getOrCreateUser(slackId);
+  return Number(user.balance);
 }
 
-function deductBalance(slackId, amount) {
-  const db = getDb();
-  const user = getOrCreateUser(slackId);
-  if (user.balance < amount) {
+async function deductBalance(slackId, amount) {
+  const user = await getOrCreateUser(slackId);
+  if (Number(user.balance) < amount) {
     throw new Error(`Insufficient balance. You have ${user.balance} coins but tried to bet ${amount}.`);
   }
-  db.prepare('UPDATE users SET balance = balance - ? WHERE slack_id = ?').run(amount, slackId);
+  await getDb().execute({ sql: 'UPDATE users SET balance = balance - ? WHERE slack_id = ?', args: [amount, slackId] });
 }
 
-function addBalance(slackId, amount) {
-  const db = getDb();
-  getOrCreateUser(slackId);
-  db.prepare('UPDATE users SET balance = balance + ? WHERE slack_id = ?').run(amount, slackId);
+async function addBalance(slackId, amount) {
+  await getOrCreateUser(slackId);
+  await getDb().execute({ sql: 'UPDATE users SET balance = balance + ? WHERE slack_id = ?', args: [amount, slackId] });
 }
 
-function getLeaderboard(limit = 10) {
-  const db = getDb();
-  return db.prepare('SELECT slack_id, balance FROM users ORDER BY balance DESC LIMIT ?').all(limit);
+async function getLeaderboard(limit = 10) {
+  const result = await getDb().execute({ sql: 'SELECT slack_id, balance FROM users ORDER BY balance DESC LIMIT ?', args: [limit] });
+  return result.rows;
 }
 
 module.exports = { getOrCreateUser, getBalance, deductBalance, addBalance, getLeaderboard };
