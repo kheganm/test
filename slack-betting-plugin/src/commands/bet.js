@@ -3,6 +3,7 @@ const { getActiveMarkets, getMarket } = require('../models/market');
 const { getUserBetsOnMarket } = require('../models/bet');
 const { createLoan, repayLoan, getActiveLoansForUser } = require('../models/loan');
 const { isAdmin } = require('../utils/permissions');
+const { resolveUserId } = require('../utils/resolve-user');
 const { buildCreateMarketModal } = require('../views/modals');
 const { buildLeaderboardMessage } = require('../views/leaderboard');
 const { buildMarketMessage } = require('../views/market-message');
@@ -43,10 +44,10 @@ function registerBetCommand(app) {
         await handleLoans(command, respond);
         break;
       case 'give':
-        await handleGive(command, args, respond);
+        await handleGive(command, args, respond, client);
         break;
       case 'reset':
-        await handleReset(command, args, respond);
+        await handleReset(command, args, respond, client);
         break;
       case 'help':
       case '':
@@ -138,21 +139,20 @@ async function handleMyBets(command, args, respond) {
 
 async function handleLoan(command, args, respond, client) {
   // Usage: /bet loan @user 500 10
-  const mentionMatch = command.text.match(/<@([A-Z0-9]+)\|?[^>]*>/);
-  // Find the numbers after the mention: amount and interest rate
-  const numbersAfterMention = command.text.replace(/<@[^>]+>/, '').match(/(\d+)/g);
+  const borrowerId = await resolveUserId(command.text, client);
+  // Find the numbers in the text: amount and interest rate
+  const numbers = command.text.match(/\b(\d+)\b/g);
 
-  if (!mentionMatch || !numbersAfterMention || numbersAfterMention.length < 2) {
+  if (!borrowerId || !numbers || numbers.length < 2) {
     await respond({
       response_type: 'ephemeral',
-      text: 'Usage: `/bet loan @user 500 10` — Offer a 500 coin loan at 10% interest',
+      text: 'Usage: `/bet loan @user 500 10` — Offer a 500 coin loan at 10% interest\nMake sure to tag the user with @.',
     });
     return;
   }
 
-  const borrowerId = mentionMatch[1];
-  const amount = parseInt(numbersAfterMention[0], 10);
-  const interestRate = parseFloat(numbersAfterMention[1]);
+  const amount = parseInt(numbers[numbers.length - 2], 10);
+  const interestRate = parseFloat(numbers[numbers.length - 1]);
 
   if (borrowerId === command.user_id) {
     await respond({ response_type: 'ephemeral', text: "You can't loan money to yourself." });
@@ -282,18 +282,18 @@ async function handleLoans(command, respond) {
   });
 }
 
-async function handleGive(command, args, respond) {
+async function handleGive(command, args, respond, client) {
   if (!isAdmin(command.user_id)) {
     await respond({ response_type: 'ephemeral', text: ':no_entry: Only admins can use `/bet give`.' });
     return;
   }
 
   // Usage: /bet give @user 500
-  const mentionMatch = command.text.match(/<@([A-Z0-9]+)\|?[^>]*>/);
+  const targetUserId = await resolveUserId(command.text, client);
   const amountStr = args[args.length - 1];
   const amount = parseInt(amountStr, 10);
 
-  if (!mentionMatch || isNaN(amount) || amount <= 0) {
+  if (!targetUserId || isNaN(amount) || amount <= 0) {
     await respond({
       response_type: 'ephemeral',
       text: 'Usage: `/bet give @user 500` — Give coins to a user',
@@ -301,7 +301,6 @@ async function handleGive(command, args, respond) {
     return;
   }
 
-  const targetUserId = mentionMatch[1];
   getOrCreateUser(targetUserId);
   addBalance(targetUserId, amount);
   const newBalance = getBalance(targetUserId);
@@ -312,24 +311,22 @@ async function handleGive(command, args, respond) {
   });
 }
 
-async function handleReset(command, args, respond) {
+async function handleReset(command, args, respond, client) {
   if (!isAdmin(command.user_id)) {
     await respond({ response_type: 'ephemeral', text: ':no_entry: Only admins can use `/bet reset`.' });
     return;
   }
 
   // Usage: /bet reset @user  (resets to starting balance)
-  const mentionMatch = command.text.match(/<@([A-Z0-9]+)\|?[^>]*>/);
+  const targetUserId = await resolveUserId(command.text, client);
 
-  if (!mentionMatch) {
+  if (!targetUserId) {
     await respond({
       response_type: 'ephemeral',
       text: 'Usage: `/bet reset @user` — Reset a user\'s balance to the starting amount',
     });
     return;
   }
-
-  const targetUserId = mentionMatch[1];
   const startingBalance = parseInt(process.env.STARTING_BALANCE || '1000', 10);
   const currentBalance = getBalance(targetUserId);
   const diff = startingBalance - currentBalance;
