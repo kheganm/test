@@ -11,8 +11,11 @@ function registerBetCommand(app) {
   app.command('/bet', async ({ command, ack, respond, client }) => {
     await ack();
 
-    const args = command.text.trim().split(/\s+/);
-    const subcommand = args[0]?.toLowerCase() || 'help';
+    const text = (command.text || '').trim();
+    const args = text.split(/\s+/);
+    const subcommand = (args[0] || '').toLowerCase();
+
+    console.log(`[/bet] user=${command.user_id} text="${text}" subcommand="${subcommand}"`);
 
     switch (subcommand) {
       case 'create':
@@ -46,6 +49,7 @@ function registerBetCommand(app) {
         await handleReset(command, args, respond);
         break;
       case 'help':
+      case '':
       default:
         await handleHelp(respond);
         break;
