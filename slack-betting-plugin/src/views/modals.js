@@ -44,7 +44,6 @@ function buildCreateMarketModal(channelId) {
         type: 'input',
         block_id: 'close_date_block',
         label: { type: 'plain_text', text: 'Betting closes on (date)' },
-        optional: true,
         element: {
           type: 'datepicker',
           action_id: 'close_date_input',
@@ -55,7 +54,6 @@ function buildCreateMarketModal(channelId) {
         type: 'input',
         block_id: 'close_time_block',
         label: { type: 'plain_text', text: 'Betting closes at (time)' },
-        optional: true,
         element: {
           type: 'timepicker',
           action_id: 'close_time_input',

@@ -10,14 +10,28 @@ function registerManageMarketActions(app) {
     const description = view.state.values.description_block?.description_input?.value || '';
     const optionsText = view.state.values.options_block.options_input.value;
 
-    // Get close date/time
+    // Get close date/time and convert from user's local timezone to UTC
     const closeDate = view.state.values.close_date_block?.close_date_input?.selected_date || null;
     const closeTime = view.state.values.close_time_block?.close_time_input?.selected_time || null;
     let closeAt = null;
-    if (closeDate && closeTime) {
-      closeAt = `${closeDate} ${closeTime}:00`;
-    } else if (closeDate) {
-      closeAt = `${closeDate} 23:59:00`;
+    if (closeDate) {
+      const timeStr = closeTime || '23:59';
+      const localDateStr = `${closeDate}T${timeStr}:00`;
+
+      // Look up the user's timezone offset
+      let tzOffsetSec = 0;
+      try {
+        const userInfo = await client.users.info({ user: body.user.id });
+        tzOffsetSec = userInfo.user.tz_offset || 0;
+      } catch (e) {
+        console.error('Could not fetch user timezone, defaulting to UTC:', e.message);
+      }
+
+      // Parse as local time, subtract offset to get UTC
+      const localMs = new Date(localDateStr).getTime();
+      const utcMs = localMs - (tzOffsetSec * 1000);
+      const utcDate = new Date(utcMs);
+      closeAt = utcDate.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
     }
 
     const optionLabels = optionsText

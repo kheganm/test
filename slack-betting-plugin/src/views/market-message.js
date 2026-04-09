@@ -75,13 +75,6 @@ async function buildMarketMessage(market) {
       elements: [
         {
           type: 'button',
-          text: { type: 'plain_text', text: ':lock: Close Betting', emoji: true },
-          action_id: `close_market_${market.id}`,
-          value: String(market.id),
-          style: 'danger',
-        },
-        {
-          type: 'button',
           text: { type: 'plain_text', text: ':x: Cancel Market', emoji: true },
           action_id: `cancel_market_${market.id}`,
           value: String(market.id),
