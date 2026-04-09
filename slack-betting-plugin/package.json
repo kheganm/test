@@ -1,0 +1,18 @@
+{
+  "name": "slack-betting-plugin",
+  "version": "1.0.0",
+  "description": "A Slack plugin for live parimutuel betting markets",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node --watch src/app.js"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.1.0",
+    "better-sqlite3": "^11.7.0",
+    "dotenv": "^16.4.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
