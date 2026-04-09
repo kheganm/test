@@ -1,4 +1,4 @@
-const { getBalance } = require('../models/user');
+const { getBalance, addBalance, getOrCreateUser } = require('../models/user');
 const { getActiveMarkets, getMarket } = require('../models/market');
 const { getUserBetsOnMarket } = require('../models/bet');
 const { buildCreateMarketModal } = require('../views/modals');
@@ -27,6 +27,12 @@ function registerBetCommand(app) {
         break;
       case 'mybets':
         await handleMyBets(command, args, respond);
+        break;
+      case 'give':
+        await handleGive(command, args, respond);
+        break;
+      case 'reset':
+        await handleReset(command, args, respond);
         break;
       case 'help':
       default:
@@ -115,6 +121,61 @@ async function handleMyBets(command, args, respond) {
   });
 }
 
+async function handleGive(command, args, respond) {
+  // Usage: /bet give @user 500
+  const mentionMatch = command.text.match(/<@([A-Z0-9]+)\|?[^>]*>/);
+  const amountStr = args[args.length - 1];
+  const amount = parseInt(amountStr, 10);
+
+  if (!mentionMatch || isNaN(amount) || amount <= 0) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'Usage: `/bet give @user 500` — Give coins to a user',
+    });
+    return;
+  }
+
+  const targetUserId = mentionMatch[1];
+  getOrCreateUser(targetUserId);
+  addBalance(targetUserId, amount);
+  const newBalance = getBalance(targetUserId);
+
+  await respond({
+    response_type: 'ephemeral',
+    text: `:moneybag: Gave *${amount} coins* to <@${targetUserId}>. Their new balance: *${newBalance} coins*`,
+  });
+}
+
+async function handleReset(command, args, respond) {
+  // Usage: /bet reset @user  (resets to starting balance)
+  const mentionMatch = command.text.match(/<@([A-Z0-9]+)\|?[^>]*>/);
+
+  if (!mentionMatch) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'Usage: `/bet reset @user` — Reset a user\'s balance to the starting amount',
+    });
+    return;
+  }
+
+  const targetUserId = mentionMatch[1];
+  const startingBalance = parseInt(process.env.STARTING_BALANCE || '1000', 10);
+  const currentBalance = getBalance(targetUserId);
+  const diff = startingBalance - currentBalance;
+
+  if (diff > 0) {
+    addBalance(targetUserId, diff);
+  } else if (diff < 0) {
+    const { getDb } = require('../db');
+    getDb().prepare('UPDATE users SET balance = ? WHERE slack_id = ?').run(startingBalance, targetUserId);
+  }
+
+  await respond({
+    response_type: 'ephemeral',
+    text: `:arrows_counterclockwise: Reset <@${targetUserId}>'s balance to *${startingBalance} coins*`,
+  });
+}
+
 async function handleHelp(respond) {
   await respond({
     response_type: 'ephemeral',
@@ -125,6 +186,11 @@ async function handleHelp(respond) {
       '`/bet markets` — List active markets in this channel',
       '`/bet mybets <market_id>` — View your bets on a market',
       '`/bet leaderboard` — Show the top earners',
+      '',
+      '*Admin Commands:*',
+      '`/bet give @user 500` — Give coins to a user',
+      '`/bet reset @user` — Reset a user\'s balance to starting amount',
+      '',
       '`/bet help` — Show this help message',
     ].join('\n'),
   });
