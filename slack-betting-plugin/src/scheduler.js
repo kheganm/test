@@ -1,8 +1,9 @@
 const { getMarketsToClose, getMarket, closeMarket } = require('./models/market');
 const { buildMarketMessage } = require('./views/market-message');
+const { getOverdueLoans, markLoanOverdueNotified } = require('./models/loan');
 
 function startScheduler(app) {
-  console.log('Market auto-close scheduler started (checks every 30s)');
+  console.log('Scheduler started (checks every 30s)');
 
   setInterval(async () => {
     try {
@@ -26,7 +27,22 @@ function startScheduler(app) {
         });
       }
     } catch (err) {
-      console.error('[scheduler] Error:', err.message);
+      console.error('[scheduler] Market close error:', err.message);
+    }
+
+    try {
+      const overdueLoans = await getOverdueLoans();
+      for (const loan of overdueLoans) {
+        console.log(`[scheduler] Loan #${loan.id} is overdue`);
+        await markLoanOverdueNotified(loan.id);
+
+        await app.client.chat.postMessage({
+          channel: loan.channel_id,
+          text: `\uD83D\uDEA8 *Loan #${loan.id} is overdue!* <@${loan.borrower_id}> owes <@${loan.lender_id}> *${loan.total_owed} coins*. Use \`/bet repay ${loan.id}\` to settle up!`,
+        });
+      }
+    } catch (err) {
+      console.error('[scheduler] Loan overdue error:', err.message);
     }
   }, 30000);
 }

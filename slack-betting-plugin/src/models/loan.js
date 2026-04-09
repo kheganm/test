@@ -1,7 +1,7 @@
 const { getDb } = require('../db');
 const { getOrCreateUser, deductBalance, addBalance } = require('./user');
 
-async function createLoan(lenderId, borrowerId, amount, interestRate, channelId) {
+async function createLoan(lenderId, borrowerId, amount, interestRate, channelId, dueAt) {
   const db = getDb();
   await getOrCreateUser(lenderId);
   await getOrCreateUser(borrowerId);
@@ -13,8 +13,8 @@ async function createLoan(lenderId, borrowerId, amount, interestRate, channelId)
 
   const totalOwed = Math.ceil(amount * (1 + interestRate / 100));
   const result = await db.execute({
-    sql: 'INSERT INTO loans (lender_id, borrower_id, amount, interest_rate, total_owed, channel_id) VALUES (?, ?, ?, ?, ?, ?)',
-    args: [lenderId, borrowerId, amount, interestRate, totalOwed, channelId],
+    sql: 'INSERT INTO loans (lender_id, borrower_id, amount, interest_rate, total_owed, channel_id, due_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    args: [lenderId, borrowerId, amount, interestRate, totalOwed, channelId, dueAt || null],
   });
   return getLoan(Number(result.lastInsertRowid));
 }
@@ -54,7 +54,7 @@ async function declineLoan(loanId) {
 async function repayLoan(loanId, borrowerId) {
   const loan = await getLoan(loanId);
   if (!loan) throw new Error('Loan not found.');
-  if (loan.status !== 'active') throw new Error('This loan is not active.');
+  if (loan.status !== 'active' && loan.status !== 'overdue') throw new Error('This loan is not active.');
   if (loan.borrower_id !== borrowerId) throw new Error("This isn't your loan to repay.");
 
   const borrowerResult = await getDb().execute({ sql: 'SELECT balance FROM users WHERE slack_id = ?', args: [borrowerId] });
@@ -79,14 +79,29 @@ async function repayLoan(loanId, borrowerId) {
 async function getActiveLoansForUser(slackId) {
   const db = getDb();
   const givenResult = await db.execute({
-    sql: "SELECT * FROM loans WHERE lender_id = ? AND status IN ('pending', 'active') ORDER BY created_at DESC",
+    sql: "SELECT * FROM loans WHERE lender_id = ? AND status IN ('pending', 'active', 'overdue') ORDER BY created_at DESC",
     args: [slackId],
   });
   const receivedResult = await db.execute({
-    sql: "SELECT * FROM loans WHERE borrower_id = ? AND status IN ('pending', 'active') ORDER BY created_at DESC",
+    sql: "SELECT * FROM loans WHERE borrower_id = ? AND status IN ('pending', 'active', 'overdue') ORDER BY created_at DESC",
     args: [slackId],
   });
   return { given: givenResult.rows, received: receivedResult.rows };
 }
 
-module.exports = { createLoan, getLoan, acceptLoan, declineLoan, repayLoan, getActiveLoansForUser };
+async function getOverdueLoans() {
+  const result = await getDb().execute({
+    sql: "SELECT * FROM loans WHERE status = 'active' AND due_at IS NOT NULL AND due_at <= datetime('now')",
+    args: [],
+  });
+  return result.rows;
+}
+
+async function markLoanOverdueNotified(loanId) {
+  await getDb().execute({
+    sql: "UPDATE loans SET status = 'overdue' WHERE id = ? AND status = 'active'",
+    args: [loanId],
+  });
+}
+
+module.exports = { createLoan, getLoan, acceptLoan, declineLoan, repayLoan, getActiveLoansForUser, getOverdueLoans, markLoanOverdueNotified };

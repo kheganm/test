@@ -41,6 +41,34 @@ async function getUserBetsOnMarket(slackId, marketId) {
   return result.rows;
 }
 
+async function withdrawUserBets(slackId, marketId) {
+  const db = getDb();
+  const marketResult = await db.execute({ sql: 'SELECT * FROM markets WHERE id = ?', args: [marketId] });
+  if (marketResult.rows.length === 0) throw new Error('Market not found.');
+  if (marketResult.rows[0].status !== 'open') throw new Error('Can only withdraw bets from open markets.');
+
+  const betsResult = await db.execute({
+    sql: 'SELECT * FROM bets WHERE slack_id = ? AND market_id = ?',
+    args: [slackId, marketId],
+  });
+
+  if (betsResult.rows.length === 0) throw new Error('You have no bets on this market.');
+
+  const totalRefund = betsResult.rows.reduce((sum, b) => sum + Number(b.amount), 0);
+
+  const tx = await db.transaction('write');
+  try {
+    await tx.execute({ sql: 'DELETE FROM bets WHERE slack_id = ? AND market_id = ?', args: [slackId, marketId] });
+    await tx.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE slack_id = ?', args: [totalRefund, slackId] });
+    await tx.commit();
+  } catch (err) {
+    await tx.rollback();
+    throw err;
+  }
+
+  return { refunded: totalRefund, betsRemoved: betsResult.rows.length };
+}
+
 async function getTopBettorsByOption(marketId) {
   const result = await getDb().execute({
     sql: `SELECT option_id, slack_id, SUM(amount) as total
@@ -61,4 +89,4 @@ async function getTopBettorsByOption(marketId) {
   return byOption;
 }
 
-module.exports = { placeBet, getPoolByOption, getTotalPool, getUserBetsOnMarket, getTopBettorsByOption };
+module.exports = { placeBet, getPoolByOption, getTotalPool, getUserBetsOnMarket, withdrawUserBets, getTopBettorsByOption };

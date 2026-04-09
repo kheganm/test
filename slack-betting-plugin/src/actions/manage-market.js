@@ -32,6 +32,14 @@ function registerManageMarketActions(app) {
       const utcMs = localMs - (tzOffsetSec * 1000);
       const utcDate = new Date(utcMs);
       closeAt = utcDate.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+
+      if (utcDate.getTime() <= Date.now()) {
+        await ack({
+          response_action: 'errors',
+          errors: { close_date_block: 'Close date must be in the future.' },
+        });
+        return;
+      }
     }
 
     const optionLabels = optionsText
@@ -158,6 +166,14 @@ function registerManageMarketActions(app) {
     const market = await getMarket(marketId);
 
     if (!market) return;
+    if (market.status !== 'open') {
+      await client.chat.postEphemeral({
+        channel: body.channel.id,
+        user: body.user.id,
+        text: 'This market is no longer open and cannot be cancelled.',
+      });
+      return;
+    }
     if (!isCreatorOrAdmin(body.user.id, market.created_by)) {
       await client.chat.postEphemeral({
         channel: body.channel.id,

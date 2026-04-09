@@ -98,7 +98,11 @@ async function cancelMarket(marketId) {
   const db = getDb();
   const tx = await db.transaction('write');
   try {
-    await tx.execute({ sql: "UPDATE markets SET status = 'cancelled' WHERE id = ?", args: [marketId] });
+    const check = await tx.execute({ sql: "SELECT status FROM markets WHERE id = ?", args: [marketId] });
+    if (check.rows.length === 0 || check.rows[0].status !== 'open') {
+      throw new Error('Only open markets can be cancelled.');
+    }
+    await tx.execute({ sql: "UPDATE markets SET status = 'cancelled' WHERE id = ? AND status = 'open'", args: [marketId] });
     const betsResult = await tx.execute({ sql: 'SELECT * FROM bets WHERE market_id = ?', args: [marketId] });
 
     for (const bet of betsResult.rows) {

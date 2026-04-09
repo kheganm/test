@@ -1,6 +1,7 @@
+const { getDb } = require('../db');
 const { getBalance, addBalance, getOrCreateUser } = require('../models/user');
 const { getActiveMarkets, getMarket } = require('../models/market');
-const { getUserBetsOnMarket } = require('../models/bet');
+const { getUserBetsOnMarket, withdrawUserBets } = require('../models/bet');
 const { createLoan, repayLoan, getActiveLoansForUser } = require('../models/loan');
 const { isAdmin } = require('../utils/permissions');
 const { resolveUserId } = require('../utils/resolve-user');
@@ -41,6 +42,9 @@ function registerBetCommand(app) {
         break;
       case 'loans':
         await handleLoans(command, respond);
+        break;
+      case 'withdraw':
+        await handleWithdraw(command, args, respond, client);
         break;
       case 'give':
         await handleGive(command, args, respond, client);
@@ -143,13 +147,23 @@ async function handleLoan(command, args, respond, client) {
   if (!borrowerId || !numbers || numbers.length < 2) {
     await respond({
       response_type: 'ephemeral',
-      text: 'Usage: `/bet loan @user 500 10` — Offer a 500 coin loan at 10% interest\nMake sure to tag the user with @.',
+      text: 'Usage: `/bet loan @user 500 10` — Offer a 500 coin loan at 10% interest\nOptional: `/bet loan @user 500 10 3d` — due in 3 days (use `d` for days, `w` for weeks)\nMake sure to tag the user with @.',
     });
     return;
   }
 
   const amount = parseInt(numbers[numbers.length - 2], 10);
   const interestRate = parseFloat(numbers[numbers.length - 1]);
+
+  // Parse optional due duration (e.g. "3d", "2w")
+  const dueMatch = command.text.match(/\b(\d+)\s*(d|w)\b/i);
+  let dueAt = null;
+  if (dueMatch) {
+    const dueNum = parseInt(dueMatch[1], 10);
+    const dueUnit = dueMatch[2].toLowerCase();
+    const dueMs = dueUnit === 'w' ? dueNum * 7 * 24 * 60 * 60 * 1000 : dueNum * 24 * 60 * 60 * 1000;
+    dueAt = new Date(Date.now() + dueMs).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+  }
 
   if (borrowerId === command.user_id) {
     await respond({ response_type: 'ephemeral', text: "You can't loan money to yourself." });
@@ -167,7 +181,13 @@ async function handleLoan(command, args, respond, client) {
   }
 
   try {
-    const loan = await createLoan(command.user_id, borrowerId, amount, interestRate, command.channel_id);
+    const loan = await createLoan(command.user_id, borrowerId, amount, interestRate, command.channel_id, dueAt);
+
+    let loanDetails = `\uD83C\uDFE6 <@${command.user_id}> is offering <@${borrowerId}> a loan!\n\n\uD83D\uDCB0 *Amount:* ${amount} coins\n\uD83D\uDCC8 *Interest:* ${interestRate}%\n\uD83D\uDCB8 *Total to repay:* ${loan.total_owed} coins`;
+    if (loan.due_at) {
+      const dueUnix = Math.floor(new Date(loan.due_at + 'Z').getTime() / 1000);
+      loanDetails += `\n\uD83D\uDCC5 *Due:* <!date^${dueUnix}^{date_short_pretty} at {time}|${loan.due_at}>`;
+    }
 
     const result = await client.chat.postMessage({
       channel: command.channel_id,
@@ -178,10 +198,7 @@ async function handleLoan(command, args, respond, client) {
         },
         {
           type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `\uD83C\uDFE6 <@${command.user_id}> is offering <@${borrowerId}> a loan!\n\n\uD83D\uDCB0 *Amount:* ${amount} coins\n\uD83D\uDCC8 *Interest:* ${interestRate}%\n\uD83D\uDCB8 *Total to repay:* ${loan.total_owed} coins`,
-          },
+          text: { type: 'mrkdwn', text: loanDetails },
         },
         { type: 'divider' },
         {
@@ -256,8 +273,13 @@ async function handleLoans(command, respond) {
   if (received.length > 0) {
     lines.push('*Loans you owe:*');
     for (const loan of received) {
-      const statusIcon = loan.status === 'pending' ? '\u231B' : '\uD83D\uDCB8';
-      lines.push(`${statusIcon} Loan #${loan.id} — ${loan.amount} coins from <@${loan.lender_id}> at ${loan.interest_rate}% \u2192 owe *${loan.total_owed} coins* (${loan.status})`);
+      const statusIcon = loan.status === 'overdue' ? '\uD83D\uDEA8' : loan.status === 'pending' ? '\u231B' : '\uD83D\uDCB8';
+      let line = `${statusIcon} Loan #${loan.id} — ${loan.amount} coins from <@${loan.lender_id}> at ${loan.interest_rate}% \u2192 owe *${loan.total_owed} coins* (${loan.status})`;
+      if (loan.due_at) {
+        const dueUnix = Math.floor(new Date(loan.due_at + 'Z').getTime() / 1000);
+        line += ` — due <!date^${dueUnix}^{date_short_pretty}|${loan.due_at}>`;
+      }
+      lines.push(line);
     }
   }
 
@@ -265,8 +287,13 @@ async function handleLoans(command, respond) {
     if (lines.length > 0) lines.push('');
     lines.push('*Loans you gave:*');
     for (const loan of given) {
-      const statusIcon = loan.status === 'pending' ? '\u231B' : '\uD83C\uDFE6';
-      lines.push(`${statusIcon} Loan #${loan.id} — ${loan.amount} coins to <@${loan.borrower_id}> at ${loan.interest_rate}% \u2192 owed *${loan.total_owed} coins* (${loan.status})`);
+      const statusIcon = loan.status === 'overdue' ? '\uD83D\uDEA8' : loan.status === 'pending' ? '\u231B' : '\uD83C\uDFE6';
+      let line = `${statusIcon} Loan #${loan.id} — ${loan.amount} coins to <@${loan.borrower_id}> at ${loan.interest_rate}% \u2192 owed *${loan.total_owed} coins* (${loan.status})`;
+      if (loan.due_at) {
+        const dueUnix = Math.floor(new Date(loan.due_at + 'Z').getTime() / 1000);
+        line += ` — due <!date^${dueUnix}^{date_short_pretty}|${loan.due_at}>`;
+      }
+      lines.push(line);
     }
   }
 
@@ -274,6 +301,41 @@ async function handleLoans(command, respond) {
     response_type: 'ephemeral',
     text: lines.join('\n'),
   });
+}
+
+async function handleWithdraw(command, args, respond, client) {
+  const marketId = parseInt(args[1], 10);
+  if (!marketId) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'Usage: `/bet withdraw <market_id>` — Withdraw all your bets from an open market',
+    });
+    return;
+  }
+
+  try {
+    const result = await withdrawUserBets(command.user_id, marketId);
+    const market = await getMarket(marketId);
+
+    // Refresh market message to update pools/odds
+    if (market && market.message_ts) {
+      const { buildMarketMessage } = require('../views/market-message');
+      const blocks = await buildMarketMessage(market);
+      await client.chat.update({
+        channel: market.channel_id,
+        ts: market.message_ts,
+        blocks,
+        text: market.title,
+      });
+    }
+
+    await respond({
+      response_type: 'ephemeral',
+      text: `\u2705 Withdrew ${result.betsRemoved} bet(s) from *${market.title}*. Refunded *${result.refunded} coins* to your balance.`,
+    });
+  } catch (err) {
+    await respond({ response_type: 'ephemeral', text: `\u274C ${err.message}` });
+  }
 }
 
 async function handleGive(command, args, respond, client) {
@@ -338,10 +400,12 @@ async function handleHelp(respond) {
       '`/bet balance` — Check your coin balance',
       '`/bet markets` — List active markets in this channel',
       '`/bet mybets <market_id>` — View your bets on a market',
+      '`/bet withdraw <market_id>` — Withdraw all your bets from an open market',
       '`/bet leaderboard` — Show the top earners',
       '',
       '*Loans:*',
       '`/bet loan @user 500 10` — Offer a 500 coin loan at 10% interest',
+      '`/bet loan @user 500 10 3d` — Same, but due in 3 days (`d`=days, `w`=weeks)',
       '`/bet loans` — View your active/pending loans',
       '`/bet repay <loan_id>` — Repay a loan',
       '',
@@ -353,7 +417,5 @@ async function handleHelp(respond) {
     ].join('\n'),
   });
 }
-
-const { getDb } = require('../db');
 
 module.exports = { registerBetCommand };

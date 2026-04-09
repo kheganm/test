@@ -61,12 +61,13 @@ async function migrate() {
       amount INTEGER NOT NULL CHECK(amount > 0),
       interest_rate REAL NOT NULL CHECK(interest_rate >= 0),
       total_owed INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'active', 'repaid', 'declined')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'active', 'repaid', 'declined', 'overdue')),
       channel_id TEXT NOT NULL,
       message_ts TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       accepted_at TEXT,
-      repaid_at TEXT
+      repaid_at TEXT,
+      due_at TEXT
     )`,
     'CREATE INDEX IF NOT EXISTS idx_bets_market ON bets(market_id)',
     'CREATE INDEX IF NOT EXISTS idx_bets_user ON bets(slack_id)',
@@ -74,6 +75,13 @@ async function migrate() {
     'CREATE INDEX IF NOT EXISTS idx_loans_lender ON loans(lender_id)',
     'CREATE INDEX IF NOT EXISTS idx_loans_borrower ON loans(borrower_id)',
   ], 'write');
+
+  // Add due_at column to existing loans tables
+  try {
+    await db.execute("ALTER TABLE loans ADD COLUMN due_at TEXT");
+  } catch (e) {
+    // Column already exists — ignore
+  }
 }
 
 module.exports = { getDb, migrate };
