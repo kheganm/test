@@ -4,6 +4,7 @@ const { App } = require('@slack/bolt');
 const { registerBetCommand } = require('./commands/bet');
 const { registerPlaceBetActions } = require('./actions/place-bet');
 const { registerManageMarketActions } = require('./actions/manage-market');
+const { registerLoanActions } = require('./actions/loan');
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -17,6 +18,7 @@ const app = new App({
 registerBetCommand(app);
 registerPlaceBetActions(app);
 registerManageMarketActions(app);
+registerLoanActions(app);
 
 (async () => {
   await app.start();

@@ -60,6 +60,24 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_bets_market ON bets(market_id);
     CREATE INDEX IF NOT EXISTS idx_bets_user ON bets(slack_id);
     CREATE INDEX IF NOT EXISTS idx_options_market ON options(market_id);
+
+    CREATE TABLE IF NOT EXISTS loans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lender_id TEXT NOT NULL,
+      borrower_id TEXT NOT NULL,
+      amount INTEGER NOT NULL CHECK(amount > 0),
+      interest_rate REAL NOT NULL CHECK(interest_rate >= 0),
+      total_owed INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'active', 'repaid', 'declined')),
+      channel_id TEXT NOT NULL,
+      message_ts TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      accepted_at TEXT,
+      repaid_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_loans_lender ON loans(lender_id);
+    CREATE INDEX IF NOT EXISTS idx_loans_borrower ON loans(borrower_id);
   `);
 }
 

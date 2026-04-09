@@ -1,6 +1,7 @@
 const { getBalance, addBalance, getOrCreateUser } = require('../models/user');
 const { getActiveMarkets, getMarket } = require('../models/market');
 const { getUserBetsOnMarket } = require('../models/bet');
+const { createLoan, repayLoan, getActiveLoansForUser } = require('../models/loan');
 const { buildCreateMarketModal } = require('../views/modals');
 const { buildLeaderboardMessage } = require('../views/leaderboard');
 const { buildMarketMessage } = require('../views/market-message');
@@ -27,6 +28,15 @@ function registerBetCommand(app) {
         break;
       case 'mybets':
         await handleMyBets(command, args, respond);
+        break;
+      case 'loan':
+        await handleLoan(command, args, respond, client);
+        break;
+      case 'repay':
+        await handleRepay(command, args, respond);
+        break;
+      case 'loans':
+        await handleLoans(command, respond);
         break;
       case 'give':
         await handleGive(command, args, respond);
@@ -121,6 +131,152 @@ async function handleMyBets(command, args, respond) {
   });
 }
 
+async function handleLoan(command, args, respond, client) {
+  // Usage: /bet loan @user 500 10
+  const mentionMatch = command.text.match(/<@([A-Z0-9]+)\|?[^>]*>/);
+  // Find the numbers after the mention: amount and interest rate
+  const numbersAfterMention = command.text.replace(/<@[^>]+>/, '').match(/(\d+)/g);
+
+  if (!mentionMatch || !numbersAfterMention || numbersAfterMention.length < 2) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'Usage: `/bet loan @user 500 10` — Offer a 500 coin loan at 10% interest',
+    });
+    return;
+  }
+
+  const borrowerId = mentionMatch[1];
+  const amount = parseInt(numbersAfterMention[0], 10);
+  const interestRate = parseFloat(numbersAfterMention[1]);
+
+  if (borrowerId === command.user_id) {
+    await respond({ response_type: 'ephemeral', text: "You can't loan money to yourself." });
+    return;
+  }
+
+  if (isNaN(amount) || amount <= 0) {
+    await respond({ response_type: 'ephemeral', text: 'Amount must be a positive number.' });
+    return;
+  }
+
+  if (isNaN(interestRate) || interestRate < 0) {
+    await respond({ response_type: 'ephemeral', text: 'Interest rate must be 0 or higher.' });
+    return;
+  }
+
+  try {
+    const loan = createLoan(command.user_id, borrowerId, amount, interestRate, command.channel_id);
+
+    // Post the loan offer to the channel with accept/decline buttons
+    const result = await client.chat.postMessage({
+      channel: command.channel_id,
+      blocks: [
+        {
+          type: 'header',
+          text: { type: 'plain_text', text: 'Loan Offer', emoji: true },
+        },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `:bank: <@${command.user_id}> is offering <@${borrowerId}> a loan!\n\n:moneybag: *Amount:* ${amount} coins\n:chart_with_upwards_trend: *Interest:* ${interestRate}%\n:money_with_wings: *Total to repay:* ${loan.total_owed} coins`,
+          },
+        },
+        { type: 'divider' },
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: 'Accept Loan', emoji: true },
+              action_id: `accept_loan_${loan.id}`,
+              value: String(loan.id),
+              style: 'primary',
+            },
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: 'Decline', emoji: true },
+              action_id: `decline_loan_${loan.id}`,
+              value: String(loan.id),
+              style: 'danger',
+            },
+          ],
+        },
+        {
+          type: 'context',
+          elements: [
+            { type: 'mrkdwn', text: `Loan #${loan.id} — Only <@${borrowerId}> can accept or decline` },
+          ],
+        },
+      ],
+      text: `Loan offer from <@${command.user_id}> to <@${borrowerId}>`,
+    });
+
+    // Save the message timestamp so we can update it later
+    const { getDb } = require('../db');
+    getDb().prepare('UPDATE loans SET message_ts = ? WHERE id = ?').run(result.ts, loan.id);
+  } catch (err) {
+    await respond({ response_type: 'ephemeral', text: `:x: ${err.message}` });
+  }
+}
+
+async function handleRepay(command, args, respond) {
+  const loanId = parseInt(args[1], 10);
+  if (!loanId) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'Usage: `/bet repay <loan_id>` — Repay an active loan\nUse `/bet loans` to see your loan IDs.',
+    });
+    return;
+  }
+
+  try {
+    const loan = repayLoan(loanId, command.user_id);
+    await respond({
+      response_type: 'in_channel',
+      text: `:white_check_mark: <@${command.user_id}> repaid *${loan.total_owed} coins* to <@${loan.lender_id}> (Loan #${loan.id}). Debt cleared!`,
+    });
+  } catch (err) {
+    await respond({ response_type: 'ephemeral', text: `:x: ${err.message}` });
+  }
+}
+
+async function handleLoans(command, respond) {
+  const { given, received } = getActiveLoansForUser(command.user_id);
+
+  if (given.length === 0 && received.length === 0) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'You have no active or pending loans.',
+    });
+    return;
+  }
+
+  const lines = [];
+
+  if (received.length > 0) {
+    lines.push('*Loans you owe:*');
+    for (const loan of received) {
+      const statusIcon = loan.status === 'pending' ? ':hourglass:' : ':money_with_wings:';
+      lines.push(`${statusIcon} Loan #${loan.id} — ${loan.amount} coins from <@${loan.lender_id}> at ${loan.interest_rate}% → owe *${loan.total_owed} coins* (${loan.status})`);
+    }
+  }
+
+  if (given.length > 0) {
+    if (lines.length > 0) lines.push('');
+    lines.push('*Loans you gave:*');
+    for (const loan of given) {
+      const statusIcon = loan.status === 'pending' ? ':hourglass:' : ':bank:';
+      lines.push(`${statusIcon} Loan #${loan.id} — ${loan.amount} coins to <@${loan.borrower_id}> at ${loan.interest_rate}% → owed *${loan.total_owed} coins* (${loan.status})`);
+    }
+  }
+
+  await respond({
+    response_type: 'ephemeral',
+    text: lines.join('\n'),
+  });
+}
+
 async function handleGive(command, args, respond) {
   // Usage: /bet give @user 500
   const mentionMatch = command.text.match(/<@([A-Z0-9]+)\|?[^>]*>/);
@@ -186,6 +342,11 @@ async function handleHelp(respond) {
       '`/bet markets` — List active markets in this channel',
       '`/bet mybets <market_id>` — View your bets on a market',
       '`/bet leaderboard` — Show the top earners',
+      '',
+      '*Loans:*',
+      '`/bet loan @user 500 10` — Offer a 500 coin loan at 10% interest',
+      '`/bet loans` — View your active/pending loans',
+      '`/bet repay <loan_id>` — Repay a loan',
       '',
       '*Admin Commands:*',
       '`/bet give @user 500` — Give coins to a user',
