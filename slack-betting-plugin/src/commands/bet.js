@@ -1,5 +1,5 @@
 const { getDb } = require('../db');
-const { getBalance, addBalance, getOrCreateUser } = require('../models/user');
+const { getBalance, addBalance, getOrCreateUser, getMoneySupply } = require('../models/user');
 const { getActiveMarkets, getMarket, deleteMarket } = require('../models/market');
 const { getUserBetsOnMarket, withdrawUserBets } = require('../models/bet');
 const { createLoan, repayLoan, getActiveLoansForUser } = require('../models/loan');
@@ -27,6 +27,10 @@ function registerBetCommand(app) {
         break;
       case 'leaderboard':
         await handleLeaderboard(command, respond);
+        break;
+      case 'economy':
+      case 'supply':
+        await handleEconomy(command, respond);
         break;
       case 'markets':
         await handleMarkets(command, respond);
@@ -85,6 +89,29 @@ async function handleLeaderboard(command, respond) {
     response_type: 'in_channel',
     blocks,
     text: 'Leaderboard',
+  });
+}
+
+async function handleEconomy(command, respond) {
+  const supply = await getMoneySupply();
+  const sign = supply.inflationPct >= 0 ? '+' : '';
+  const trend = supply.inflationPct > 0 ? '\uD83D\uDCC8' : supply.inflationPct < 0 ? '\uD83D\uDCC9' : '\u27A1\uFE0F';
+
+  const text = [
+    '*\uD83C\uDFE6 Economy Report*',
+    '',
+    `\uD83D\uDC65 *Users:* ${supply.userCount}`,
+    `\uD83D\uDCB0 *Initial supply:* ${supply.initialSupply.toLocaleString()} coins  _(${supply.userCount} \u00D7 ${supply.startingBalance})_`,
+    `\uD83D\uDCB5 *Current supply:* ${supply.currentSupply.toLocaleString()} coins`,
+    `     \u2022 In wallets: ${supply.walletTotal.toLocaleString()} coins`,
+    `     \u2022 Locked in markets: ${supply.lockedTotal.toLocaleString()} coins`,
+    '',
+    `${trend} *Inflation:* ${sign}${supply.inflationPct.toFixed(2)}% from initial supply`,
+  ].join('\n');
+
+  await respond({
+    response_type: 'in_channel',
+    text,
   });
 }
 
@@ -451,6 +478,7 @@ async function handleHelp(respond) {
       '`/bet mybets <market_id>` — View your bets on a market',
       '`/bet withdraw <market_id>` — Withdraw all your bets from an open market',
       '`/bet leaderboard` — Show the top earners',
+      '`/bet economy` — Show total money supply and inflation rate',
       '',
       '*Loans:*',
       '`/bet loan @user 500 10` — Offer a 500 coin loan at 10% interest',

@@ -35,4 +35,38 @@ async function getLeaderboard(limit = 10) {
   return result.rows;
 }
 
-module.exports = { getOrCreateUser, getBalance, deductBalance, addBalance, getLeaderboard };
+async function getMoneySupply() {
+  const db = getDb();
+
+  const userCountResult = await db.execute({ sql: 'SELECT COUNT(*) as count FROM users', args: [] });
+  const userCount = Number(userCountResult.rows[0].count);
+
+  const walletResult = await db.execute({ sql: 'SELECT COALESCE(SUM(balance), 0) as total FROM users', args: [] });
+  const walletTotal = Number(walletResult.rows[0].total);
+
+  // Coins locked in active markets (open or closed but not yet resolved/cancelled)
+  const lockedResult = await db.execute({
+    sql: `SELECT COALESCE(SUM(b.amount), 0) as total
+          FROM bets b
+          JOIN markets m ON b.market_id = m.id
+          WHERE m.status IN ('open', 'closed')`,
+    args: [],
+  });
+  const lockedTotal = Number(lockedResult.rows[0].total);
+
+  const currentSupply = walletTotal + lockedTotal;
+  const initialSupply = userCount * STARTING_BALANCE;
+  const inflationPct = initialSupply > 0 ? ((currentSupply - initialSupply) / initialSupply) * 100 : 0;
+
+  return {
+    userCount,
+    startingBalance: STARTING_BALANCE,
+    initialSupply,
+    currentSupply,
+    walletTotal,
+    lockedTotal,
+    inflationPct,
+  };
+}
+
+module.exports = { getOrCreateUser, getBalance, deductBalance, addBalance, getLeaderboard, getMoneySupply };
