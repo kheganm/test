@@ -1,5 +1,5 @@
 const { getDb } = require('../db');
-const { getBalance, addBalance, getOrCreateUser, getMoneySupply } = require('../models/user');
+const { getBalance, addBalance, getOrCreateUser, getMoneySupply, suspendUser, getActiveSuspension } = require('../models/user');
 const { getActiveMarkets, getMarket, deleteMarket } = require('../models/market');
 const { getUserBetsOnMarket, withdrawUserBets } = require('../models/bet');
 const { createLoan, repayLoan, getActiveLoansForUser } = require('../models/loan');
@@ -17,6 +17,21 @@ function registerBetCommand(app) {
     const subcommand = (args[0] || '').toLowerCase();
 
     console.log(`[/bet] user=${command.user_id} text="${text}" subcommand="${subcommand}"`);
+
+    // Check suspension for action commands (allow read-only + admin commands through)
+    const readOnlyCommands = ['balance', 'leaderboard', 'economy', 'supply', 'markets', 'mybets', 'loans', 'help', ''];
+    const adminCommands = ['give', 'reset', 'delete', 'suspend'];
+    if (!readOnlyCommands.includes(subcommand) && !adminCommands.includes(subcommand)) {
+      const suspension = await getActiveSuspension(command.user_id);
+      if (suspension) {
+        const expiresUnix = Math.floor(new Date(suspension.expires_at + 'Z').getTime() / 1000);
+        await respond({
+          response_type: 'ephemeral',
+          text: `\uD83D\uDEA8 *You are suspended by the CFTC.*\n*Reason:* ${suspension.reason}\n*Expires:* <!date^${expiresUnix}^{date_short_pretty} at {time}|${suspension.expires_at}>\n\nYou cannot place bets, create markets, take loans, or withdraw until your suspension is lifted.`,
+        });
+        return;
+      }
+    }
 
     switch (subcommand) {
       case 'create':
@@ -55,6 +70,9 @@ function registerBetCommand(app) {
         break;
       case 'reset':
         await handleReset(command, args, respond, client);
+        break;
+      case 'suspend':
+        await handleSuspend(command, args, respond, client);
         break;
       case 'delete':
         await handleDelete(command, args, respond, client);
@@ -467,6 +485,65 @@ async function handleDelete(command, args, respond, client) {
   }
 }
 
+async function handleSuspend(command, args, respond, client) {
+  if (!isAdmin(command.user_id)) {
+    await respond({ response_type: 'ephemeral', text: '\uD83D\uDEAB Only admins can use `/bet suspend`.' });
+    return;
+  }
+
+  const targetUserId = await resolveUserId(command.text, client);
+
+  // Parse duration (e.g. "1h", "3d", "2w")
+  const durationMatch = command.text.match(/\b(\d+)\s*(h|d|w)\b/i);
+
+  // Reason is everything after the duration token
+  const textAfterUser = command.text.replace(/<@[^>]+>|@\S+/g, '').trim();
+  const reasonMatch = textAfterUser.replace(/\b\d+\s*(h|d|w)\b/i, '').trim();
+  const reason = reasonMatch || 'No reason provided';
+
+  if (!targetUserId || !durationMatch) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'Usage: `/bet suspend @user 3d Market manipulation` — Suspend for 3 days\nDurations: `h`=hours, `d`=days, `w`=weeks',
+    });
+    return;
+  }
+
+  const durationNum = parseInt(durationMatch[1], 10);
+  const durationUnit = durationMatch[2].toLowerCase();
+  const multipliers = { h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000, w: 7 * 24 * 60 * 60 * 1000 };
+  const durationMs = durationNum * multipliers[durationUnit];
+  const durationLabels = { h: 'hour(s)', d: 'day(s)', w: 'week(s)' };
+
+  try {
+    const result = await suspendUser(targetUserId, reason, command.user_id, command.channel_id, durationMs);
+    const expiresUnix = Math.floor(new Date(result.expiresAt + 'Z').getTime() / 1000);
+
+    // Post public notification to channel
+    await client.chat.postMessage({
+      channel: command.channel_id,
+      text: [
+        `\uD83D\uDEA8\uD83D\uDEA8\uD83D\uDEA8 *CFTC ENFORCEMENT ACTION* \uD83D\uDEA8\uD83D\uDEA8\uD83D\uDEA8`,
+        '',
+        `<@${targetUserId}> has been *suspended* from all trading activity.`,
+        '',
+        `\uD83D\uDCCB *Offense:* ${reason}`,
+        `\u23F1\uFE0F *Duration:* ${durationNum} ${durationLabels[durationUnit]}`,
+        `\uD83D\uDD13 *Reinstated:* <!date^${expiresUnix}^{date_short_pretty} at {time}|${result.expiresAt}>`,
+        '',
+        `_This enforcement action was issued by the Coin Futures Trading Commission (CFTC)._`,
+      ].join('\n'),
+    });
+
+    await respond({
+      response_type: 'ephemeral',
+      text: `\u2705 Suspended <@${targetUserId}> for ${durationNum} ${durationLabels[durationUnit]}.`,
+    });
+  } catch (err) {
+    await respond({ response_type: 'ephemeral', text: `\u274C ${err.message}` });
+  }
+}
+
 async function handleHelp(respond) {
   await respond({
     response_type: 'ephemeral',
@@ -490,6 +567,7 @@ async function handleHelp(respond) {
       '`/bet give @user 500` — Give coins to a user',
       '`/bet reset @user` — Reset a user\'s balance to starting amount',
       '`/bet delete <market_id>` — Delete a market and its message from the channel',
+      '`/bet suspend @user 3d Reason` — Suspend a user (`h`/`d`/`w`)',
       '',
       '`/bet help` — Show this help message',
     ].join('\n'),

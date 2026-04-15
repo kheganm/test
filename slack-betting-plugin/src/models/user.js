@@ -69,4 +69,37 @@ async function getMoneySupply() {
   };
 }
 
-module.exports = { getOrCreateUser, getBalance, deductBalance, addBalance, getLeaderboard, getMoneySupply };
+async function suspendUser(slackId, reason, suspendedBy, channelId, durationMs) {
+  const expiresAt = new Date(Date.now() + durationMs).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+  await getOrCreateUser(slackId);
+  await getDb().execute({
+    sql: 'INSERT INTO suspensions (slack_id, reason, suspended_by, channel_id, expires_at) VALUES (?, ?, ?, ?, ?)',
+    args: [slackId, reason, suspendedBy, channelId, expiresAt],
+  });
+  return { expiresAt };
+}
+
+async function getActiveSuspension(slackId) {
+  const result = await getDb().execute({
+    sql: "SELECT * FROM suspensions WHERE slack_id = ? AND status = 'active' AND expires_at > datetime('now') ORDER BY expires_at DESC LIMIT 1",
+    args: [slackId],
+  });
+  return result.rows[0] || null;
+}
+
+async function getExpiredSuspensions() {
+  const result = await getDb().execute({
+    sql: "SELECT * FROM suspensions WHERE status = 'active' AND expires_at <= datetime('now')",
+    args: [],
+  });
+  return result.rows;
+}
+
+async function liftSuspension(suspensionId) {
+  await getDb().execute({
+    sql: "UPDATE suspensions SET status = 'lifted', lifted_at = datetime('now') WHERE id = ?",
+    args: [suspensionId],
+  });
+}
+
+module.exports = { getOrCreateUser, getBalance, deductBalance, addBalance, getLeaderboard, getMoneySupply, suspendUser, getActiveSuspension, getExpiredSuspensions, liftSuspension };

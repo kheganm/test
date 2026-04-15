@@ -1,6 +1,7 @@
 const { getMarketsToClose, getMarket, closeMarket } = require('./models/market');
 const { buildMarketMessage } = require('./views/market-message');
 const { getOverdueLoans, markLoanOverdueNotified } = require('./models/loan');
+const { getExpiredSuspensions, liftSuspension } = require('./models/user');
 
 function startScheduler(app) {
   console.log('Scheduler started (checks every 30s)');
@@ -43,6 +44,21 @@ function startScheduler(app) {
       }
     } catch (err) {
       console.error('[scheduler] Loan overdue error:', err.message);
+    }
+
+    try {
+      const expired = await getExpiredSuspensions();
+      for (const suspension of expired) {
+        console.log(`[scheduler] Lifting suspension #${suspension.id} for user ${suspension.slack_id}`);
+        await liftSuspension(suspension.id);
+
+        await app.client.chat.postMessage({
+          channel: suspension.channel_id,
+          text: `\uD83D\uDD13 <@${suspension.slack_id}>'s CFTC suspension has been lifted. They may resume trading.`,
+        });
+      }
+    } catch (err) {
+      console.error('[scheduler] Suspension lift error:', err.message);
     }
   }, 30000);
 }

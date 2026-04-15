@@ -1,6 +1,6 @@
 const { getMarket } = require('../models/market');
 const { placeBet } = require('../models/bet');
-const { getBalance } = require('../models/user');
+const { getBalance, getActiveSuspension } = require('../models/user');
 const { buildPlaceBetModal } = require('../views/modals');
 const { buildMarketMessage } = require('../views/market-message');
 
@@ -8,6 +8,16 @@ function registerPlaceBetActions(app) {
   // Handle "Bet on this" button clicks — opens the bet modal
   app.action(/^place_bet_\d+_\d+$/, async ({ action, ack, client, body }) => {
     await ack();
+
+    const suspension = await getActiveSuspension(body.user.id);
+    if (suspension) {
+      await client.chat.postEphemeral({
+        channel: body.channel.id,
+        user: body.user.id,
+        text: `\uD83D\uDEA8 You are suspended by the CFTC and cannot place bets. Reason: ${suspension.reason}`,
+      });
+      return;
+    }
 
     const { marketId, optionId } = JSON.parse(action.value);
     const market = await getMarket(marketId);

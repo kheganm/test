@@ -74,6 +74,18 @@ async function migrate() {
     'CREATE INDEX IF NOT EXISTS idx_options_market ON options(market_id)',
     'CREATE INDEX IF NOT EXISTS idx_loans_lender ON loans(lender_id)',
     'CREATE INDEX IF NOT EXISTS idx_loans_borrower ON loans(borrower_id)',
+    `CREATE TABLE IF NOT EXISTS suspensions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slack_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      suspended_by TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      suspended_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL,
+      lifted_at TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'lifted'))
+    )`,
+    'CREATE INDEX IF NOT EXISTS idx_suspensions_user ON suspensions(slack_id)',
   ], 'write');
 
   // Add due_at column to existing loans tables
