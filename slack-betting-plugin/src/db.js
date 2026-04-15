@@ -86,6 +86,11 @@ async function migrate() {
       status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'lifted'))
     )`,
     'CREATE INDEX IF NOT EXISTS idx_suspensions_user ON suspensions(slack_id)',
+    `CREATE TABLE IF NOT EXISTS cftc_pool (
+      id INTEGER PRIMARY KEY CHECK(id = 1),
+      balance INTEGER NOT NULL DEFAULT 0
+    )`,
+    "INSERT OR IGNORE INTO cftc_pool (id, balance) VALUES (1, 0)",
   ], 'write');
 
   // Add due_at column to existing loans tables

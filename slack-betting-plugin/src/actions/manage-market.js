@@ -1,6 +1,7 @@
 const { createMarket, getMarket, setMessageTs, closeMarket, resolveMarket, cancelMarket } = require('../models/market');
 const { buildMarketMessage } = require('../views/market-message');
 const { isCreatorOrAdmin } = require('../utils/permissions');
+const { applyCftcBlind } = require('../models/cftc');
 
 function registerManageMarketActions(app) {
   // Handle create market modal submission
@@ -97,6 +98,9 @@ function registerManageMarketActions(app) {
     }
 
     await closeMarket(marketId);
+
+    const blind = await applyCftcBlind(marketId);
+
     const updated = await getMarket(marketId);
     const blocks = await buildMarketMessage(updated);
 
@@ -107,9 +111,14 @@ function registerManageMarketActions(app) {
       text: updated.title,
     });
 
+    let closeText = `\uD83D\uDD12 Betting is now *CLOSED* on *${updated.title}*. Waiting for results...`;
+    if (blind) {
+      closeText += `\n\uD83C\uDFE6 The CFTC placed a *${blind.amount} coin* blind bet on *${blind.optionLabel}*.`;
+    }
+
     await client.chat.postMessage({
       channel: updated.channel_id,
-      text: `\uD83D\uDD12 Betting is now *CLOSED* on *${updated.title}*. Waiting for results...`,
+      text: closeText,
     });
   });
 

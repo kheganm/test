@@ -72,7 +72,7 @@ async function withdrawUserBets(slackId, marketId) {
 async function getTopBettorsByOption(marketId) {
   const result = await getDb().execute({
     sql: `SELECT option_id, slack_id, SUM(amount) as total
-          FROM bets WHERE market_id = ?
+          FROM bets WHERE market_id = ? AND slack_id != '__CFTC__'
           GROUP BY option_id, slack_id
           ORDER BY option_id, total DESC`,
     args: [marketId],
@@ -89,4 +89,16 @@ async function getTopBettorsByOption(marketId) {
   return byOption;
 }
 
-module.exports = { placeBet, getPoolByOption, getTotalPool, getUserBetsOnMarket, withdrawUserBets, getTopBettorsByOption };
+async function getCftcBetForOption(marketId) {
+  const result = await getDb().execute({
+    sql: "SELECT option_id, SUM(amount) as total FROM bets WHERE market_id = ? AND slack_id = '__CFTC__' GROUP BY option_id",
+    args: [marketId],
+  });
+  const map = {};
+  for (const row of result.rows) {
+    map[row.option_id] = Number(row.total);
+  }
+  return map;
+}
+
+module.exports = { placeBet, getPoolByOption, getTotalPool, getUserBetsOnMarket, withdrawUserBets, getTopBettorsByOption, getCftcBetForOption };

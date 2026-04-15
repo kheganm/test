@@ -2,6 +2,7 @@ const { getMarketsToClose, getMarket, closeMarket } = require('./models/market')
 const { buildMarketMessage } = require('./views/market-message');
 const { getOverdueLoans, markLoanOverdueNotified } = require('./models/loan');
 const { getExpiredSuspensions, liftSuspension } = require('./models/user');
+const { applyCftcBlind } = require('./models/cftc');
 
 function startScheduler(app) {
   console.log('Scheduler started (checks every 30s)');
@@ -12,6 +13,9 @@ function startScheduler(app) {
       for (const market of markets) {
         console.log(`[scheduler] Auto-closing market #${market.id}: ${market.title}`);
         await closeMarket(market.id);
+
+        const blind = await applyCftcBlind(market.id);
+
         const updated = await getMarket(market.id);
         const blocks = await buildMarketMessage(updated);
 
@@ -22,9 +26,14 @@ function startScheduler(app) {
           text: updated.title,
         });
 
+        let closeText = `\u23F0 Betting is now *CLOSED* on *${updated.title}*. Time's up! Waiting for results...`;
+        if (blind) {
+          closeText += `\n\uD83C\uDFE6 The CFTC placed a *${blind.amount} coin* blind bet on *${blind.optionLabel}*.`;
+        }
+
         await app.client.chat.postMessage({
           channel: updated.channel_id,
-          text: `\u23F0 Betting is now *CLOSED* on *${updated.title}*. Time's up! Waiting for results...`,
+          text: closeText,
         });
       }
     } catch (err) {

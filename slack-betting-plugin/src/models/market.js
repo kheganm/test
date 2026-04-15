@@ -1,4 +1,5 @@
 const { getDb } = require('../db');
+const { CFTC_USER_ID } = require('./cftc');
 
 async function createMarket(title, description, createdBy, channelId, optionLabels, closeAt) {
   const db = getDb();
@@ -82,8 +83,14 @@ async function resolveMarket(marketId, winningOptionId) {
     for (const bet of betsResult.rows) {
       const payout = Math.floor((Number(bet.amount) / winningPool) * totalPool);
       await tx.execute({ sql: 'UPDATE bets SET payout = ? WHERE id = ?', args: [payout, bet.id] });
-      await tx.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE slack_id = ?', args: [payout, bet.slack_id] });
-      payouts.push({ slackId: bet.slack_id, amount: Number(bet.amount), payout });
+
+      if (bet.slack_id === CFTC_USER_ID) {
+        // CFTC winnings go back to the pool
+        await tx.execute({ sql: 'UPDATE cftc_pool SET balance = balance + ? WHERE id = 1', args: [payout] });
+      } else {
+        await tx.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE slack_id = ?', args: [payout, bet.slack_id] });
+        payouts.push({ slackId: bet.slack_id, amount: Number(bet.amount), payout });
+      }
     }
 
     await tx.commit();

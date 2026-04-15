@@ -1,6 +1,7 @@
 const { getDb } = require('../db');
-const { getBalance, addBalance, getOrCreateUser, getMoneySupply, suspendUser, getActiveSuspension } = require('../models/user');
+const { getBalance, addBalance, getOrCreateUser, getMoneySupply, suspendUser, getActiveSuspension, deductBalance } = require('../models/user');
 const { getActiveMarkets, getMarket, deleteMarket } = require('../models/market');
+const { getCftcBalance, addToCftcPool } = require('../models/cftc');
 const { getUserBetsOnMarket, withdrawUserBets } = require('../models/bet');
 const { createLoan, repayLoan, getActiveLoansForUser } = require('../models/loan');
 const { isAdmin } = require('../utils/permissions');
@@ -20,7 +21,7 @@ function registerBetCommand(app) {
 
     // Check suspension for action commands (allow read-only + admin commands through)
     const readOnlyCommands = ['balance', 'leaderboard', 'economy', 'supply', 'markets', 'mybets', 'loans', 'help', ''];
-    const adminCommands = ['give', 'reset', 'delete', 'suspend'];
+    const adminCommands = ['give', 'reset', 'delete', 'suspend', 'fine'];
     if (!readOnlyCommands.includes(subcommand) && !adminCommands.includes(subcommand)) {
       const suspension = await getActiveSuspension(command.user_id);
       if (suspension) {
@@ -71,6 +72,9 @@ function registerBetCommand(app) {
       case 'reset':
         await handleReset(command, args, respond, client);
         break;
+      case 'fine':
+        await handleFine(command, args, respond, client);
+        break;
       case 'suspend':
         await handleSuspend(command, args, respond, client);
         break;
@@ -112,6 +116,7 @@ async function handleLeaderboard(command, respond) {
 
 async function handleEconomy(command, respond) {
   const supply = await getMoneySupply();
+  const cftcBalance = await getCftcBalance();
   const sign = supply.inflationPct >= 0 ? '+' : '';
   const trend = supply.inflationPct > 0 ? '\uD83D\uDCC8' : supply.inflationPct < 0 ? '\uD83D\uDCC9' : '\u27A1\uFE0F';
 
@@ -123,6 +128,7 @@ async function handleEconomy(command, respond) {
     `\uD83D\uDCB5 *Current supply:* ${supply.currentSupply.toLocaleString()} coins`,
     `     \u2022 In wallets: ${supply.walletTotal.toLocaleString()} coins`,
     `     \u2022 Locked in markets: ${supply.lockedTotal.toLocaleString()} coins`,
+    `     \u2022 CFTC pool: ${cftcBalance.toLocaleString()} coins`,
     '',
     `${trend} *Inflation:* ${sign}${supply.inflationPct.toFixed(2)}% from initial supply`,
   ].join('\n');
@@ -485,6 +491,61 @@ async function handleDelete(command, args, respond, client) {
   }
 }
 
+async function handleFine(command, args, respond, client) {
+  if (!isAdmin(command.user_id)) {
+    await respond({ response_type: 'ephemeral', text: '\uD83D\uDEAB Only admins can use `/bet fine`.' });
+    return;
+  }
+
+  const targetUserId = await resolveUserId(command.text, client);
+  const numbers = command.text.match(/\b(\d+)\b/g);
+
+  if (!targetUserId || !numbers || numbers.length < 1) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'Usage: `/bet fine @user 500 Market manipulation` — Fine a user and add coins to the CFTC pool',
+    });
+    return;
+  }
+
+  const amount = parseInt(numbers[0], 10);
+  if (isNaN(amount) || amount <= 0) {
+    await respond({ response_type: 'ephemeral', text: 'Fine amount must be a positive number.' });
+    return;
+  }
+
+  // Extract reason: everything after the user mention and amount
+  const textAfterUser = command.text.replace(/<@[^>]+>|@\S+/g, '').trim();
+  const reason = textAfterUser.replace(/^\d+\s*/, '').trim() || 'No reason provided';
+
+  try {
+    await deductBalance(targetUserId, amount);
+    await addToCftcPool(amount);
+    const cftcBalance = await getCftcBalance();
+
+    await client.chat.postMessage({
+      channel: command.channel_id,
+      text: [
+        `\uD83D\uDCB8 *CFTC FINE ISSUED* \uD83D\uDCB8`,
+        '',
+        `<@${targetUserId}> has been fined *${amount} coins*.`,
+        '',
+        `\uD83D\uDCCB *Violation:* ${reason}`,
+        `\uD83C\uDFE6 *CFTC Pool Balance:* ${cftcBalance} coins`,
+        '',
+        `_Fines are redistributed as market blind bets on underdog positions at market close._`,
+      ].join('\n'),
+    });
+
+    await respond({
+      response_type: 'ephemeral',
+      text: `\u2705 Fined <@${targetUserId}> ${amount} coins. CFTC pool is now ${cftcBalance} coins.`,
+    });
+  } catch (err) {
+    await respond({ response_type: 'ephemeral', text: `\u274C ${err.message}` });
+  }
+}
+
 async function handleSuspend(command, args, respond, client) {
   if (!isAdmin(command.user_id)) {
     await respond({ response_type: 'ephemeral', text: '\uD83D\uDEAB Only admins can use `/bet suspend`.' });
@@ -567,6 +628,7 @@ async function handleHelp(respond) {
       '`/bet give @user 500` — Give coins to a user',
       '`/bet reset @user` — Reset a user\'s balance to starting amount',
       '`/bet delete <market_id>` — Delete a market and its message from the channel',
+      '`/bet fine @user 500 Reason` — Fine a user (coins go to CFTC pool)',
       '`/bet suspend @user 3d Reason` — Suspend a user (`h`/`d`/`w`)',
       '',
       '`/bet help` — Show this help message',

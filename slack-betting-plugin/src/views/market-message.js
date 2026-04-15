@@ -1,4 +1,4 @@
-const { getPoolByOption, getTotalPool, getTopBettorsByOption } = require('../models/bet');
+const { getPoolByOption, getTotalPool, getTopBettorsByOption, getCftcBetForOption } = require('../models/bet');
 const { calculateOdds, formatOdds } = require('../utils/odds');
 
 const STATUS_EMOJI = {
@@ -17,6 +17,7 @@ async function buildMarketMessage(market) {
   }
 
   const topBettors = await getTopBettorsByOption(market.id);
+  const cftcBets = await getCftcBetForOption(market.id);
 
   const statusEmoji = STATUS_EMOJI[market.status] || '\u2753';
   const blocks = [];
@@ -69,14 +70,22 @@ async function buildMarketMessage(market) {
     blocks.push(sectionBlock);
 
     const optionTopBettors = topBettors[option.id];
+    const cftcAmount = cftcBets[option.id];
+    const contextParts = [];
+    if (cftcAmount) {
+      contextParts.push(`\uD83C\uDFE6 *CFTC blind:* ${cftcAmount} coins`);
+    }
     if (optionTopBettors && optionTopBettors.length > 0) {
       const bettorLines = optionTopBettors.map(
         (b, i) => `${i + 1}. <@${b.slackId}> \u2014 ${b.total} coins`
       );
+      contextParts.push(`\uD83D\uDCCA *Top bettors:* ${bettorLines.join('  |  ')}`);
+    }
+    if (contextParts.length > 0) {
       blocks.push({
         type: 'context',
         elements: [
-          { type: 'mrkdwn', text: `\uD83D\uDCCA *Top bettors:* ${bettorLines.join('  |  ')}` },
+          { type: 'mrkdwn', text: contextParts.join('\n') },
         ],
       });
     }
