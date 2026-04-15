@@ -91,6 +91,35 @@ async function migrate() {
       balance INTEGER NOT NULL DEFAULT 0
     )`,
     "INSERT OR IGNORE INTO cftc_pool (id, balance) VALUES (1, 0)",
+    `CREATE TABLE IF NOT EXISTS fines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slack_id TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      fined_by TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'overturned')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS petitions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      petition_type TEXT NOT NULL CHECK(petition_type IN ('fine', 'suspension')),
+      reference_id INTEGER NOT NULL,
+      created_by TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      message_ts TEXT,
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'passed', 'failed')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS petition_votes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      petition_id INTEGER NOT NULL,
+      slack_id TEXT NOT NULL,
+      vote TEXT NOT NULL CHECK(vote IN ('overturn', 'uphold')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (petition_id) REFERENCES petitions(id),
+      UNIQUE(petition_id, slack_id)
+    )`,
   ], 'write');
 
   // Add due_at column to existing loans tables

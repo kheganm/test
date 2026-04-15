@@ -72,11 +72,11 @@ async function getMoneySupply() {
 async function suspendUser(slackId, reason, suspendedBy, channelId, durationMs) {
   const expiresAt = new Date(Date.now() + durationMs).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
   await getOrCreateUser(slackId);
-  await getDb().execute({
+  const result = await getDb().execute({
     sql: 'INSERT INTO suspensions (slack_id, reason, suspended_by, channel_id, expires_at) VALUES (?, ?, ?, ?, ?)',
     args: [slackId, reason, suspendedBy, channelId, expiresAt],
   });
-  return { expiresAt };
+  return { id: Number(result.lastInsertRowid), expiresAt };
 }
 
 async function getActiveSuspension(slackId) {

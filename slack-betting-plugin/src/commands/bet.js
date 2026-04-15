@@ -5,6 +5,7 @@ const { getCftcBalance, addToCftcPool } = require('../models/cftc');
 const { getUserBetsOnMarket, withdrawUserBets } = require('../models/bet');
 const { createLoan, repayLoan, getActiveLoansForUser } = require('../models/loan');
 const { isAdmin } = require('../utils/permissions');
+const { createPetition, getReferencedAction } = require('../models/petition');
 const { resolveUserId } = require('../utils/resolve-user');
 const { buildCreateMarketModal } = require('../views/modals');
 const { buildLeaderboardMessage } = require('../views/leaderboard');
@@ -20,7 +21,7 @@ function registerBetCommand(app) {
     console.log(`[/bet] user=${command.user_id} text="${text}" subcommand="${subcommand}"`);
 
     // Check suspension for action commands (allow read-only + admin commands through)
-    const readOnlyCommands = ['balance', 'leaderboard', 'economy', 'supply', 'markets', 'mybets', 'loans', 'help', ''];
+    const readOnlyCommands = ['balance', 'leaderboard', 'economy', 'supply', 'markets', 'mybets', 'loans', 'petition', 'help', ''];
     const adminCommands = ['give', 'reset', 'delete', 'suspend', 'fine'];
     if (!readOnlyCommands.includes(subcommand) && !adminCommands.includes(subcommand)) {
       const suspension = await getActiveSuspension(command.user_id);
@@ -71,6 +72,9 @@ function registerBetCommand(app) {
         break;
       case 'reset':
         await handleReset(command, args, respond, client);
+        break;
+      case 'petition':
+        await handlePetition(command, args, respond, client);
         break;
       case 'fine':
         await handleFine(command, args, respond, client);
@@ -491,6 +495,89 @@ async function handleDelete(command, args, respond, client) {
   }
 }
 
+async function handlePetition(command, args, respond, client) {
+  const petitionType = (args[1] || '').toLowerCase();
+  const referenceId = parseInt(args[2], 10);
+
+  if (!['fine', 'suspension'].includes(petitionType) || !referenceId) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'Usage: `/bet petition fine <fine_id>` or `/bet petition suspension <suspension_id>`',
+    });
+    return;
+  }
+
+  try {
+    const petition = await createPetition(petitionType, referenceId, command.user_id, command.channel_id);
+    const action = await getReferencedAction(petition);
+
+    let description;
+    if (petitionType === 'fine') {
+      description = `\uD83D\uDCB8 *Fine #${referenceId}* — <@${action.slack_id}> was fined *${action.amount} coins*\n\uD83D\uDCCB *Reason:* ${action.reason}`;
+    } else {
+      description = `\uD83D\uDEA8 *Suspension #${referenceId}* — <@${action.slack_id}> was suspended\n\uD83D\uDCCB *Reason:* ${action.reason}`;
+    }
+
+    const result = await client.chat.postMessage({
+      channel: command.channel_id,
+      blocks: [
+        {
+          type: 'header',
+          text: { type: 'plain_text', text: '\uD83D\uDCDC Petition to Overturn CFTC Action', emoji: true },
+        },
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: description },
+        },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `Filed by <@${command.user_id}>\n\n*Vote to overturn or uphold this action.* A majority of all registered users must vote to overturn for it to pass.\n\n\u2705 *Overturn:* 0  |  \u274C *Uphold:* 0`,
+          },
+        },
+        { type: 'divider' },
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: '\u2705 Vote to Overturn', emoji: true },
+              action_id: `petition_vote_overturn_${petition.id}`,
+              value: String(petition.id),
+              style: 'primary',
+            },
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: '\u274C Vote to Uphold', emoji: true },
+              action_id: `petition_vote_uphold_${petition.id}`,
+              value: String(petition.id),
+              style: 'danger',
+            },
+          ],
+        },
+        {
+          type: 'context',
+          elements: [
+            { type: 'mrkdwn', text: `Petition #${petition.id} \u2014 ${petitionType} #${referenceId}` },
+          ],
+        },
+      ],
+      text: `Petition to overturn ${petitionType} #${referenceId}`,
+    });
+
+    const { setPetitionMessageTs } = require('../models/petition');
+    await setPetitionMessageTs(petition.id, result.ts);
+
+    await respond({
+      response_type: 'ephemeral',
+      text: `\u2705 Petition #${petition.id} created. The community can now vote.`,
+    });
+  } catch (err) {
+    await respond({ response_type: 'ephemeral', text: `\u274C ${err.message}` });
+  }
+}
+
 async function handleFine(command, args, respond, client) {
   if (!isAdmin(command.user_id)) {
     await respond({ response_type: 'ephemeral', text: '\uD83D\uDEAB Only admins can use `/bet fine`.' });
@@ -523,6 +610,13 @@ async function handleFine(command, args, respond, client) {
     await addToCftcPool(amount);
     const cftcBalance = await getCftcBalance();
 
+    // Record fine in DB for petition tracking
+    const fineResult = await getDb().execute({
+      sql: 'INSERT INTO fines (slack_id, amount, reason, fined_by, channel_id) VALUES (?, ?, ?, ?, ?)',
+      args: [targetUserId, amount, reason, command.user_id, command.channel_id],
+    });
+    const fineId = Number(fineResult.lastInsertRowid);
+
     await client.chat.postMessage({
       channel: command.channel_id,
       text: [
@@ -532,14 +626,16 @@ async function handleFine(command, args, respond, client) {
         '',
         `\uD83D\uDCCB *Violation:* ${reason}`,
         `\uD83C\uDFE6 *CFTC Pool Balance:* ${cftcBalance} coins`,
+        `\uD83D\uDDC3\uFE0F *Fine #${fineId}*`,
         '',
         `_Fines are redistributed as market blind bets on underdog positions at market close._`,
+        `_Use \`/bet petition fine ${fineId}\` to challenge this action._`,
       ].join('\n'),
     });
 
     await respond({
       response_type: 'ephemeral',
-      text: `\u2705 Fined <@${targetUserId}> ${amount} coins. CFTC pool is now ${cftcBalance} coins.`,
+      text: `\u2705 Fined <@${targetUserId}> ${amount} coins (Fine #${fineId}). CFTC pool is now ${cftcBalance} coins.`,
     });
   } catch (err) {
     await respond({ response_type: 'ephemeral', text: `\u274C ${err.message}` });
@@ -591,14 +687,16 @@ async function handleSuspend(command, args, respond, client) {
         `\uD83D\uDCCB *Offense:* ${reason}`,
         `\u23F1\uFE0F *Duration:* ${durationNum} ${durationLabels[durationUnit]}`,
         `\uD83D\uDD13 *Reinstated:* <!date^${expiresUnix}^{date_short_pretty} at {time}|${result.expiresAt}>`,
+        `\uD83D\uDDC3\uFE0F *Suspension #${result.id}*`,
         '',
         `_This enforcement action was issued by the Coin Futures Trading Commission (CFTC)._`,
+        `_Use \`/bet petition suspension ${result.id}\` to challenge this action._`,
       ].join('\n'),
     });
 
     await respond({
       response_type: 'ephemeral',
-      text: `\u2705 Suspended <@${targetUserId}> for ${durationNum} ${durationLabels[durationUnit]}.`,
+      text: `\u2705 Suspended <@${targetUserId}> for ${durationNum} ${durationLabels[durationUnit]} (Suspension #${result.id}).`,
     });
   } catch (err) {
     await respond({ response_type: 'ephemeral', text: `\u274C ${err.message}` });
@@ -617,6 +715,8 @@ async function handleHelp(respond) {
       '`/bet withdraw <market_id>` — Withdraw all your bets from an open market',
       '`/bet leaderboard` — Show the top earners',
       '`/bet economy` — Show total money supply and inflation rate',
+      '`/bet petition fine <id>` — Petition to overturn a fine',
+      '`/bet petition suspension <id>` — Petition to overturn a suspension',
       '',
       '*Loans:*',
       '`/bet loan @user 500 10` — Offer a 500 coin loan at 10% interest',
