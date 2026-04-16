@@ -65,41 +65,10 @@ function registerManageMarketActions(app) {
       return;
     }
 
-    // Parse initial odds for fixed-odds markets
-    let initialOdds = null;
-    if (marketType === 'fixed_odds') {
-      const oddsText = view.state.values.initial_odds_block?.initial_odds_input?.value || '';
-      const oddsValues = oddsText
-        .split('\n')
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0)
-        .map((l) => parseFloat(l));
-
-      if (oddsValues.length !== optionLabels.length) {
-        await ack({
-          response_action: 'errors',
-          errors: { initial_odds_block: `Please provide exactly ${optionLabels.length} odds values (one per option).` },
-        });
-        return;
-      }
-
-      for (const o of oddsValues) {
-        if (isNaN(o) || o <= 1.0) {
-          await ack({
-            response_action: 'errors',
-            errors: { initial_odds_block: 'Each odds value must be a number greater than 1.0 (e.g., 2.50).' },
-          });
-          return;
-        }
-      }
-
-      initialOdds = oddsValues;
-    }
-
     await ack();
 
     const creatorId = body.user.id;
-    const marketId = await createMarket(title, description, creatorId, channelId, optionLabels, closeAt, marketType, initialOdds);
+    const marketId = await createMarket(title, description, creatorId, channelId, optionLabels, closeAt, marketType);
     const market = await getMarket(marketId);
     const blocks = await buildMarketMessage(market);
 
@@ -133,7 +102,7 @@ function registerManageMarketActions(app) {
 
     // CFTC blind only applies to parimutuel markets
     let blind = null;
-    if (market.market_type !== 'fixed_odds') {
+    if (market.market_type !== 'weighted') {
       blind = await applyCftcBlind(marketId);
     }
 
@@ -176,7 +145,7 @@ function registerManageMarketActions(app) {
     }
 
     const result = await resolveMarket(marketId, optionId);
-    const { payouts, marketType: resolvedType, houseDelta } = result;
+    const { payouts } = result;
     const updated = await getMarket(marketId);
     const winner = updated.options.find((o) => Number(o.id) === optionId);
     const blocks = await buildMarketMessage(updated);
@@ -193,20 +162,9 @@ function registerManageMarketActions(app) {
       resultText += '_No winning bets — the house keeps the pool!_';
     } else {
       const payoutLines = payouts.map((p) => {
-        if (resolvedType === 'fixed_odds' && p.lockedOdds) {
-          return `<@${p.slackId}>: bet ${p.amount} at ${p.lockedOdds.toFixed(2)}x \u2192 won *${p.payout} coins* \uD83D\uDCB0`;
-        }
         return `<@${p.slackId}>: bet ${p.amount} \u2192 won *${p.payout} coins* \uD83D\uDCB0`;
       });
       resultText += `*Payouts:*\n${payoutLines.join('\n')}`;
-    }
-
-    if (resolvedType === 'fixed_odds' && houseDelta !== undefined) {
-      if (houseDelta >= 0) {
-        resultText += `\n\n\uD83C\uDFE6 *House profit:* +${houseDelta} coins`;
-      } else {
-        resultText += `\n\n\uD83C\uDFE6 *House loss:* ${houseDelta} coins`;
-      }
     }
 
     await client.chat.postMessage({

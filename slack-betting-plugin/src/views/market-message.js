@@ -1,6 +1,6 @@
 const { getPoolByOption, getTotalPool, getTopBettorsByOption, getCftcBetForOption } = require('../models/bet');
 const { calculateOdds, formatOdds } = require('../utils/odds');
-const { calculateFixedOdds, formatFixedOdds } = require('../utils/fixed-odds');
+const { calculateCostMultipliers, formatMultiplier } = require('../utils/weighted');
 
 const STATUS_EMOJI = {
   open: '\uD83D\uDFE2',       // green circle
@@ -20,18 +20,18 @@ async function buildMarketMessage(market) {
   const topBettors = await getTopBettorsByOption(market.id);
   const cftcBets = await getCftcBetForOption(market.id);
 
-  const isFixedOdds = market.market_type === 'fixed_odds';
-  const typeLabel = isFixedOdds ? 'FIXED ODDS' : 'POOL';
+  const isWeighted = market.market_type === 'weighted';
+  const typeLabel = isWeighted ? 'WEIGHTED' : 'POOL';
 
-  // For fixed-odds, compute current shifting odds
-  let fixedOddsMap = {};
-  if (isFixedOdds) {
+  // For weighted markets, compute current cost multipliers
+  let multiplierMap = {};
+  if (isWeighted) {
     const betsPerOption = {};
     for (const opt of market.options) {
       const pool = poolMap[opt.id];
       betsPerOption[opt.id] = pool ? Number(pool.pool) : 0;
     }
-    fixedOddsMap = calculateFixedOdds(market.options, betsPerOption, totalPool);
+    multiplierMap = calculateCostMultipliers(market.options.length, betsPerOption, totalPool);
   }
 
   const statusEmoji = STATUS_EMOJI[market.status] || '\u2753';
@@ -64,9 +64,9 @@ async function buildMarketMessage(market) {
     const winnerTag = option.is_winner ? ' \uD83C\uDFC6 *WINNER*' : '';
 
     let oddsDisplay;
-    if (isFixedOdds) {
-      const currentOdds = fixedOddsMap[option.id] || Number(option.initial_odds) || 2;
-      oddsDisplay = `Odds: ${formatFixedOdds(currentOdds)}`;
+    if (isWeighted) {
+      const multiplier = multiplierMap[option.id] || 1.0;
+      oddsDisplay = `Cost: ${formatMultiplier(multiplier)}`;
     } else {
       const odds = calculateOdds(poolAmount, totalPool);
       oddsDisplay = `Odds: ${formatOdds(odds)}`;
@@ -95,7 +95,7 @@ async function buildMarketMessage(market) {
     const optionTopBettors = topBettors[option.id];
     const cftcAmount = cftcBets[option.id];
     const contextParts = [];
-    if (cftcAmount && !isFixedOdds) {
+    if (cftcAmount && !isWeighted) {
       contextParts.push(`\uD83C\uDFE6 *CFTC blind:* ${cftcAmount} coins`);
     }
     if (optionTopBettors && optionTopBettors.length > 0) {

@@ -18,7 +18,7 @@ function startScheduler(app) {
 
         // CFTC blind only applies to parimutuel markets
         let blind = null;
-        if (market.market_type !== 'fixed_odds') {
+        if (market.market_type !== 'weighted') {
           blind = await applyCftcBlind(market.id);
         }
 

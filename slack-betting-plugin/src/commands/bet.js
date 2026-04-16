@@ -138,7 +138,7 @@ async function handleEconomy(command, respond) {
     `     \u2022 In wallets: ${supply.walletTotal.toLocaleString()} coins`,
     `     \u2022 Locked in markets: ${supply.lockedTotal.toLocaleString()} coins`,
     `     \u2022 CFTC fine pool: ${cftcBalance.toLocaleString()} coins`,
-    `     \u2022 House pool (fixed-odds): ${houseBalance.toLocaleString()} coins`,
+    `     \u2022 House pool (weighted): ${houseBalance.toLocaleString()} coins`,
     '',
     `${trend} *Inflation:* ${sign}${supply.inflationPct.toFixed(2)}% from initial supply`,
   ].join('\n');
@@ -195,17 +195,17 @@ async function handleMyBets(command, args, respond) {
     return;
   }
 
-  const isFixedOdds = market.market_type === 'fixed_odds';
+  const isWeighted = market.market_type === 'weighted';
   const total = bets.reduce((sum, b) => sum + Number(b.amount), 0);
   const lines = bets.map((b) => {
-    if (isFixedOdds && b.locked_odds) {
-      const payout = Math.floor(Number(b.amount) * Number(b.locked_odds));
-      return `\u2022 ${b.option_label}: ${b.amount} coins at ${Number(b.locked_odds).toFixed(2)}x (payout: ${payout} coins)`;
+    if (isWeighted && b.locked_odds) {
+      const actualCost = Math.ceil(Number(b.amount) * Number(b.locked_odds));
+      return `\u2022 ${b.option_label}: ${b.amount} coins (cost: ${actualCost} at ${Number(b.locked_odds).toFixed(2)}x)`;
     }
     return `\u2022 ${b.option_label}: ${b.amount} coins`;
   });
 
-  const typeLabel = isFixedOdds ? ' (Fixed Odds)' : '';
+  const typeLabel = isWeighted ? ' (Weighted)' : '';
   await respond({
     response_type: 'ephemeral',
     text: `*Your bets on "${market.title}"${typeLabel}:*\n${lines.join('\n')}\n\nTotal wagered: *${total} coins*`,
@@ -730,7 +730,7 @@ async function handleHouse(command, args, respond) {
     const balance = await getHouseBalance();
     await respond({
       response_type: 'ephemeral',
-      text: `\uD83C\uDFE6 *Fixed-Odds House Pool:* ${balance} coins\n\nUsage: \`/bet house 5000\` \u2014 Fund the house pool with 5000 coins`,
+      text: `\uD83C\uDFE6 *Weighted House Pool:* ${balance} coins\n\nUsage: \`/bet house 5000\` \u2014 Fund the house pool with 5000 coins`,
     });
     return;
   }
@@ -740,7 +740,7 @@ async function handleHouse(command, args, respond) {
 
   await respond({
     response_type: 'ephemeral',
-    text: `\uD83C\uDFE6 Added *${amount} coins* to the fixed-odds house pool. New balance: *${newBalance} coins*`,
+    text: `\uD83C\uDFE6 Added *${amount} coins* to the weighted house pool. New balance: *${newBalance} coins*`,
   });
 }
 
@@ -749,7 +749,7 @@ async function handleHelp(respond) {
     response_type: 'ephemeral',
     text: [
       '*Betting Bot Commands:*',
-      '`/bet create` — Create a new betting market (Pool or Fixed Odds)',
+      '`/bet create` — Create a new betting market (Pool or Weighted)',
       '`/bet balance` — Check your coin balance',
       '`/bet markets` — List active markets in this channel',
       '`/bet mybets <market_id>` — View your bets on a market',
@@ -761,7 +761,7 @@ async function handleHelp(respond) {
       '',
       '*Market Types:*',
       '\u2022 *Pool (Parimutuel)* — All bets go into a shared pool. Winners split proportionally.',
-      '\u2022 *Fixed Odds* — Odds shift dynamically but lock at bet time. House pool covers shortfalls.',
+      '\u2022 *Weighted* — Favorites cost more, underdogs cost less. House pool manages the spread. Payouts are parimutuel.',
       '',
       '*Loans:*',
       '`/bet loan @user 500 10` — Offer a 500 coin loan at 10% interest',
@@ -775,7 +775,7 @@ async function handleHelp(respond) {
       '`/bet delete <market_id>` — Delete a market and its message from the channel',
       '`/bet fine @user 500 Reason` — Fine a user (coins go to CFTC pool)',
       '`/bet suspend @user 3d Reason` — Suspend a user (`h`/`d`/`w`)',
-      '`/bet house 5000` — Fund the fixed-odds house pool',
+      '`/bet house 5000` — Fund the weighted house pool',
       '',
       '`/bet help` — Show this help message',
     ].join('\n'),

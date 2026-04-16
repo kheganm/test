@@ -1,7 +1,8 @@
 const { getDb } = require('../db');
-const { deductBalance } = require('./user');
+const { deductBalance, getBalance } = require('./user');
+const { addToHousePool, deductFromHousePool } = require('./house');
 
-async function placeBet(slackId, marketId, optionId, amount, lockedOdds = null) {
+async function placeBet(slackId, marketId, optionId, amount, costMultiplier = null) {
   const db = getDb();
   const marketResult = await db.execute({ sql: 'SELECT * FROM markets WHERE id = ?', args: [marketId] });
   if (marketResult.rows.length === 0) throw new Error('Market not found.');
@@ -10,11 +11,36 @@ async function placeBet(slackId, marketId, optionId, amount, lockedOdds = null) 
   const optionResult = await db.execute({ sql: 'SELECT * FROM options WHERE id = ? AND market_id = ?', args: [optionId, marketId] });
   if (optionResult.rows.length === 0) throw new Error('Invalid option.');
 
-  await deductBalance(slackId, amount);
-  await db.execute({
-    sql: 'INSERT INTO bets (slack_id, market_id, option_id, amount, locked_odds) VALUES (?, ?, ?, ?, ?)',
-    args: [slackId, marketId, optionId, amount, lockedOdds],
-  });
+  if (costMultiplier) {
+    // Weighted market: charge actual cost (amount * multiplier) from wallet
+    const actualCost = Math.ceil(amount * costMultiplier);
+    const balance = await getBalance(slackId);
+    if (balance < actualCost) {
+      throw new Error(`Insufficient balance. This ${amount} coin bet costs ${actualCost} coins (${costMultiplier.toFixed(2)}x multiplier) but you have ${balance} coins.`);
+    }
+    await deductBalance(slackId, actualCost);
+
+    // Record nominal amount in pool, store multiplier for refund purposes
+    await db.execute({
+      sql: 'INSERT INTO bets (slack_id, market_id, option_id, amount, locked_odds) VALUES (?, ?, ?, ?, ?)',
+      args: [slackId, marketId, optionId, amount, costMultiplier],
+    });
+
+    // House pool absorbs the spread
+    const houseDelta = actualCost - amount;
+    if (houseDelta > 0) {
+      await addToHousePool(houseDelta);
+    } else if (houseDelta < 0) {
+      await deductFromHousePool(Math.abs(houseDelta));
+    }
+  } else {
+    // Parimutuel market: standard deduction
+    await deductBalance(slackId, amount);
+    await db.execute({
+      sql: 'INSERT INTO bets (slack_id, market_id, option_id, amount) VALUES (?, ?, ?, ?)',
+      args: [slackId, marketId, optionId, amount],
+    });
+  }
 }
 
 async function getPoolByOption(marketId) {
@@ -47,6 +73,8 @@ async function withdrawUserBets(slackId, marketId) {
   if (marketResult.rows.length === 0) throw new Error('Market not found.');
   if (marketResult.rows[0].status !== 'open') throw new Error('Can only withdraw bets from open markets.');
 
+  const isWeighted = marketResult.rows[0].market_type === 'weighted';
+
   const betsResult = await db.execute({
     sql: 'SELECT * FROM bets WHERE slack_id = ? AND market_id = ?',
     args: [slackId, marketId],
@@ -54,12 +82,32 @@ async function withdrawUserBets(slackId, marketId) {
 
   if (betsResult.rows.length === 0) throw new Error('You have no bets on this market.');
 
-  const totalRefund = betsResult.rows.reduce((sum, b) => sum + Number(b.amount), 0);
+  // For weighted bets, refund the actual cost (amount * multiplier), not just nominal amount
+  let totalRefund = 0;
+  let totalHouseDelta = 0;
+  for (const b of betsResult.rows) {
+    const amt = Number(b.amount);
+    if (isWeighted && b.locked_odds) {
+      const actualCost = Math.ceil(amt * Number(b.locked_odds));
+      totalRefund += actualCost;
+      totalHouseDelta += actualCost - amt;
+    } else {
+      totalRefund += amt;
+    }
+  }
 
   const tx = await db.transaction('write');
   try {
     await tx.execute({ sql: 'DELETE FROM bets WHERE slack_id = ? AND market_id = ?', args: [slackId, marketId] });
     await tx.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE slack_id = ?', args: [totalRefund, slackId] });
+
+    // Reverse house pool deltas for weighted bets
+    if (totalHouseDelta > 0) {
+      await tx.execute({ sql: 'UPDATE house_pool SET balance = balance - ? WHERE id = 1', args: [totalHouseDelta] });
+    } else if (totalHouseDelta < 0) {
+      await tx.execute({ sql: 'UPDATE house_pool SET balance = balance + ? WHERE id = 1', args: [Math.abs(totalHouseDelta)] });
+    }
+
     await tx.commit();
   } catch (err) {
     await tx.rollback();

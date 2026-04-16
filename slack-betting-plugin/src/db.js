@@ -148,14 +148,14 @@ async function migrate() {
     // Column already exists — ignore
   }
 
-  // Add initial_odds column to options (for fixed-odds markets)
+  // Add initial_odds column to options (unused, kept for schema compat)
   try {
     await db.execute("ALTER TABLE options ADD COLUMN initial_odds REAL");
   } catch (e) {
     // Column already exists — ignore
   }
 
-  // Add locked_odds column to bets (for fixed-odds bets)
+  // Add locked_odds column to bets (stores cost multiplier for weighted bets)
   try {
     await db.execute("ALTER TABLE bets ADD COLUMN locked_odds REAL");
   } catch (e) {

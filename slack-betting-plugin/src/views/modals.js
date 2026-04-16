@@ -24,8 +24,8 @@ function buildCreateMarketModal(channelId) {
               value: 'parimutuel',
             },
             {
-              text: { type: 'plain_text', text: 'Fixed Odds' },
-              value: 'fixed_odds',
+              text: { type: 'plain_text', text: 'Weighted' },
+              value: 'weighted',
             },
           ],
         },
@@ -65,18 +65,6 @@ function buildCreateMarketModal(channelId) {
       },
       {
         type: 'input',
-        block_id: 'initial_odds_block',
-        label: { type: 'plain_text', text: 'Initial Odds (Fixed Odds only — one per line, matching options)' },
-        optional: true,
-        element: {
-          type: 'plain_text_input',
-          action_id: 'initial_odds_input',
-          multiline: true,
-          placeholder: { type: 'plain_text', text: '2.50\n1.80\n(one decimal odds per option line)' },
-        },
-      },
-      {
-        type: 'input',
         block_id: 'close_date_block',
         label: { type: 'plain_text', text: 'Betting closes on (date)' },
         element: {
@@ -99,11 +87,12 @@ function buildCreateMarketModal(channelId) {
   };
 }
 
-function buildPlaceBetModal(marketId, optionId, optionLabel, balance, marketType = 'parimutuel', currentOdds = null) {
+function buildPlaceBetModal(marketId, optionId, optionLabel, balance, marketType = 'parimutuel', costMultiplier = null) {
   let infoText = `You're betting on: *${optionLabel}*\n\nYour balance: *${balance} coins*`;
 
-  if (marketType === 'fixed_odds' && currentOdds !== null) {
-    infoText += `\n\n\uD83C\uDFB2 *Current odds:* ${currentOdds.toFixed(2)}x\nYour payout = bet \u00D7 ${currentOdds.toFixed(2)}\n_Odds are locked at the time you place your bet._`;
+  if (marketType === 'weighted' && costMultiplier !== null) {
+    const exampleCost = Math.ceil(100 * costMultiplier);
+    infoText += `\n\n\u2696\uFE0F *Cost multiplier:* ${costMultiplier.toFixed(2)}x\nA 100 coin bet will cost *${exampleCost} coins* from your wallet.\n_Multiplier is based on current market balance._`;
   }
 
   return {
