@@ -1,6 +1,6 @@
-const SENSITIVITY = 10000;
-const MIN_MULTIPLIER = 0.5;
-const MAX_MULTIPLIER = 2.0;
+const SENSITIVITY = 500;
+const MIN_MULTIPLIER = 0.25;
+const MAX_MULTIPLIER = 3.0;
 
 /**
  * Calculate cost multipliers for all options in a weighted market.
