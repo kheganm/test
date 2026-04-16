@@ -91,6 +91,11 @@ async function migrate() {
       balance INTEGER NOT NULL DEFAULT 0
     )`,
     "INSERT OR IGNORE INTO cftc_pool (id, balance) VALUES (1, 0)",
+    `CREATE TABLE IF NOT EXISTS house_pool (
+      id INTEGER PRIMARY KEY CHECK(id = 1),
+      balance INTEGER NOT NULL DEFAULT 0
+    )`,
+    "INSERT OR IGNORE INTO house_pool (id, balance) VALUES (1, 0)",
     `CREATE TABLE IF NOT EXISTS fines (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       slack_id TEXT NOT NULL,
@@ -125,6 +130,34 @@ async function migrate() {
   // Add due_at column to existing loans tables
   try {
     await db.execute("ALTER TABLE loans ADD COLUMN due_at TEXT");
+  } catch (e) {
+    // Column already exists — ignore
+  }
+
+  // Add closes_at column to petitions
+  try {
+    await db.execute("ALTER TABLE petitions ADD COLUMN closes_at TEXT");
+  } catch (e) {
+    // Column already exists — ignore
+  }
+
+  // Add market_type column to markets
+  try {
+    await db.execute("ALTER TABLE markets ADD COLUMN market_type TEXT NOT NULL DEFAULT 'parimutuel'");
+  } catch (e) {
+    // Column already exists — ignore
+  }
+
+  // Add initial_odds column to options (for fixed-odds markets)
+  try {
+    await db.execute("ALTER TABLE options ADD COLUMN initial_odds REAL");
+  } catch (e) {
+    // Column already exists — ignore
+  }
+
+  // Add locked_odds column to bets (for fixed-odds bets)
+  try {
+    await db.execute("ALTER TABLE bets ADD COLUMN locked_odds REAL");
   } catch (e) {
     // Column already exists — ignore
   }

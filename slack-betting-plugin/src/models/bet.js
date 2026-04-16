@@ -1,7 +1,7 @@
 const { getDb } = require('../db');
 const { deductBalance } = require('./user');
 
-async function placeBet(slackId, marketId, optionId, amount) {
+async function placeBet(slackId, marketId, optionId, amount, lockedOdds = null) {
   const db = getDb();
   const marketResult = await db.execute({ sql: 'SELECT * FROM markets WHERE id = ?', args: [marketId] });
   if (marketResult.rows.length === 0) throw new Error('Market not found.');
@@ -12,8 +12,8 @@ async function placeBet(slackId, marketId, optionId, amount) {
 
   await deductBalance(slackId, amount);
   await db.execute({
-    sql: 'INSERT INTO bets (slack_id, market_id, option_id, amount) VALUES (?, ?, ?, ?)',
-    args: [slackId, marketId, optionId, amount],
+    sql: 'INSERT INTO bets (slack_id, market_id, option_id, amount, locked_odds) VALUES (?, ?, ?, ?, ?)',
+    args: [slackId, marketId, optionId, amount, lockedOdds],
   });
 }
 

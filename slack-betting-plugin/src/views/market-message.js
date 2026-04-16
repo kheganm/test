@@ -1,5 +1,6 @@
 const { getPoolByOption, getTotalPool, getTopBettorsByOption, getCftcBetForOption } = require('../models/bet');
 const { calculateOdds, formatOdds } = require('../utils/odds');
+const { calculateFixedOdds, formatFixedOdds } = require('../utils/fixed-odds');
 
 const STATUS_EMOJI = {
   open: '\uD83D\uDFE2',       // green circle
@@ -19,6 +20,20 @@ async function buildMarketMessage(market) {
   const topBettors = await getTopBettorsByOption(market.id);
   const cftcBets = await getCftcBetForOption(market.id);
 
+  const isFixedOdds = market.market_type === 'fixed_odds';
+  const typeLabel = isFixedOdds ? 'FIXED ODDS' : 'POOL';
+
+  // For fixed-odds, compute current shifting odds
+  let fixedOddsMap = {};
+  if (isFixedOdds) {
+    const betsPerOption = {};
+    for (const opt of market.options) {
+      const pool = poolMap[opt.id];
+      betsPerOption[opt.id] = pool ? Number(pool.pool) : 0;
+    }
+    fixedOddsMap = calculateFixedOdds(market.options, betsPerOption, totalPool);
+  }
+
   const statusEmoji = STATUS_EMOJI[market.status] || '\u2753';
   const blocks = [];
 
@@ -27,7 +42,7 @@ async function buildMarketMessage(market) {
     text: { type: 'plain_text', text: `${market.title}`, emoji: true },
   });
 
-  let statusText = `${statusEmoji} *Status:* ${market.status.toUpperCase()}  |  \uD83D\uDCB0 *Total Pool:* ${totalPool} coins`;
+  let statusText = `${statusEmoji} *Status:* ${market.status.toUpperCase()}  |  \uD83C\uDFB2 *Type:* ${typeLabel}  |  \uD83D\uDCB0 *Total Pool:* ${totalPool} coins`;
   if (market.close_at && market.status === 'open') {
     statusText += `\n\u23F0 *Betting closes:* <!date^${Math.floor(new Date(market.close_at + 'Z').getTime() / 1000)}^{date_short_pretty} at {time}|${market.close_at}>`;
   }
@@ -44,16 +59,24 @@ async function buildMarketMessage(market) {
     const pool = poolMap[option.id] || { pool: 0, num_bets: 0 };
     const poolAmount = Number(pool.pool);
     const numBets = Number(pool.num_bets);
-    const odds = calculateOdds(poolAmount, totalPool);
     const percentage = totalPool > 0 ? ((poolAmount / totalPool) * 100).toFixed(1) : '0.0';
     const progressBar = buildProgressBar(totalPool > 0 ? poolAmount / totalPool : 0);
     const winnerTag = option.is_winner ? ' \uD83C\uDFC6 *WINNER*' : '';
+
+    let oddsDisplay;
+    if (isFixedOdds) {
+      const currentOdds = fixedOddsMap[option.id] || Number(option.initial_odds) || 2;
+      oddsDisplay = `Odds: ${formatFixedOdds(currentOdds)}`;
+    } else {
+      const odds = calculateOdds(poolAmount, totalPool);
+      oddsDisplay = `Odds: ${formatOdds(odds)}`;
+    }
 
     const sectionBlock = {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*${option.label}*${winnerTag}\n${progressBar} ${percentage}%\nPool: ${poolAmount} coins  |  Odds: ${formatOdds(odds)}  |  ${numBets} bet(s)`,
+        text: `*${option.label}*${winnerTag}\n${progressBar} ${percentage}%\nPool: ${poolAmount} coins  |  ${oddsDisplay}  |  ${numBets} bet(s)`,
       },
     };
 
@@ -72,7 +95,7 @@ async function buildMarketMessage(market) {
     const optionTopBettors = topBettors[option.id];
     const cftcAmount = cftcBets[option.id];
     const contextParts = [];
-    if (cftcAmount) {
+    if (cftcAmount && !isFixedOdds) {
       contextParts.push(`\uD83C\uDFE6 *CFTC blind:* ${cftcAmount} coins`);
     }
     if (optionTopBettors && optionTopBettors.length > 0) {
@@ -124,7 +147,7 @@ async function buildMarketMessage(market) {
     elements: [
       {
         type: 'mrkdwn',
-        text: `Created by <@${market.created_by}>  |  Market #${market.id}${market.status === 'open' ? '  |  Use the buttons above to bet' : ''}`,
+        text: `Created by <@${market.created_by}>  |  Market #${market.id}  |  ${typeLabel}${market.status === 'open' ? '  |  Use the buttons above to bet' : ''}`,
       },
     ],
   });

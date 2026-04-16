@@ -1,6 +1,6 @@
-const { getPetition, castVote, getVoteCounts, getTotalUserCount, closePetition, getReferencedAction, setPetitionMessageTs } = require('../models/petition');
+const { getPetition, castVote, getVoteCounts, closePetition, getReferencedAction, setPetitionMessageTs } = require('../models/petition');
 const { addBalance, liftSuspension } = require('../models/user');
-const { addToCftcPool, getCftcBalance } = require('../models/cftc');
+const { getCftcBalance } = require('../models/cftc');
 const { getDb } = require('../db');
 
 function registerPetitionActions(app) {
@@ -33,8 +33,6 @@ function registerPetitionActions(app) {
     }
 
     const counts = await getVoteCounts(petitionId);
-    const totalUsers = await getTotalUserCount();
-    const majority = Math.floor(totalUsers / 2) + 1;
     const action_ref = await getReferencedAction(petition);
 
     let description;
@@ -44,62 +42,19 @@ function registerPetitionActions(app) {
       description = `\uD83D\uDEA8 *Suspension #${petition.reference_id}* — <@${action_ref.slack_id}> was suspended\n\uD83D\uDCCB *Reason:* ${action_ref.reason}`;
     }
 
-    // Check if petition passes or fails
-    const overturned = counts.overturn >= majority;
-    const upheld = counts.uphold >= majority;
+    // Update the vote counts on the message (resolution happens via scheduler after 24h)
+    await client.chat.update({
+      channel: petition.channel_id,
+      ts: petition.message_ts,
+      blocks: buildOpenPetitionBlocks(description, petition, counts),
+      text: `Petition #${petitionId} — voting in progress`,
+    });
 
-    if (overturned) {
-      await closePetition(petitionId, 'passed');
-      await overturnAction(petition, action_ref);
-
-      // Update message to show result
-      await client.chat.update({
-        channel: petition.channel_id,
-        ts: petition.message_ts,
-        blocks: buildClosedPetitionBlocks(description, petition, counts, totalUsers, 'OVERTURNED'),
-        text: `Petition #${petitionId} passed — action overturned`,
-      });
-
-      let resultText;
-      if (petition.petition_type === 'fine') {
-        resultText = `\uD83D\uDCDC *Petition #${petitionId} PASSED* — Fine #${petition.reference_id} has been *overturned*!\n<@${action_ref.slack_id}> has been refunded *${action_ref.amount} coins*.`;
-      } else {
-        resultText = `\uD83D\uDCDC *Petition #${petitionId} PASSED* — Suspension #${petition.reference_id} has been *overturned*!\n<@${action_ref.slack_id}>'s suspension has been lifted.`;
-      }
-
-      await client.chat.postMessage({
-        channel: petition.channel_id,
-        text: resultText,
-      });
-    } else if (upheld) {
-      await closePetition(petitionId, 'failed');
-
-      await client.chat.update({
-        channel: petition.channel_id,
-        ts: petition.message_ts,
-        blocks: buildClosedPetitionBlocks(description, petition, counts, totalUsers, 'UPHELD'),
-        text: `Petition #${petitionId} failed — action upheld`,
-      });
-
-      await client.chat.postMessage({
-        channel: petition.channel_id,
-        text: `\uD83D\uDCDC *Petition #${petitionId} FAILED* — The ${petition.petition_type} has been *upheld* by majority vote.`,
-      });
-    } else {
-      // Still open — update the vote counts on the message
-      await client.chat.update({
-        channel: petition.channel_id,
-        ts: petition.message_ts,
-        blocks: buildOpenPetitionBlocks(description, petition, counts, totalUsers, majority),
-        text: `Petition #${petitionId} — voting in progress`,
-      });
-
-      await client.chat.postEphemeral({
-        channel: body.channel.id,
-        user: body.user.id,
-        text: `Your vote to *${vote}* has been recorded.`,
-      });
-    }
+    await client.chat.postEphemeral({
+      channel: body.channel.id,
+      user: body.user.id,
+      text: `Your vote to *${vote}* has been recorded.`,
+    });
   });
 }
 
@@ -120,7 +75,14 @@ async function overturnAction(petition, action_ref) {
   }
 }
 
-function buildOpenPetitionBlocks(description, petition, counts, totalUsers, majority) {
+function buildOpenPetitionBlocks(description, petition, counts) {
+  let deadlineText = '';
+  if (petition.closes_at) {
+    const closesUnix = Math.floor(new Date(petition.closes_at + 'Z').getTime() / 1000);
+    deadlineText = `\n\u23F0 *Voting closes:* <!date^${closesUnix}^{date_short_pretty} at {time}|${petition.closes_at}>`;
+  }
+  const totalVotes = counts.overturn + counts.uphold;
+
   return [
     {
       type: 'header',
@@ -134,7 +96,7 @@ function buildOpenPetitionBlocks(description, petition, counts, totalUsers, majo
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `Filed by <@${petition.created_by}>\n\n*Vote to overturn or uphold this action.* Need *${majority}* votes (majority of ${totalUsers} users) for a decision.\n\n\u2705 *Overturn:* ${counts.overturn}  |  \u274C *Uphold:* ${counts.uphold}`,
+        text: `Filed by <@${petition.created_by}>${deadlineText}\n\n*Vote to overturn or uphold this action.* Majority of votes cast when the 24h window closes wins. Votes are final and cannot be changed.\n\n\u2705 *Overturn:* ${counts.overturn}  |  \u274C *Uphold:* ${counts.uphold}  |  \uD83D\uDDF3\uFE0F *Total:* ${totalVotes}`,
       },
     },
     { type: 'divider' },
@@ -166,8 +128,9 @@ function buildOpenPetitionBlocks(description, petition, counts, totalUsers, majo
   ];
 }
 
-function buildClosedPetitionBlocks(description, petition, counts, totalUsers, outcome) {
+function buildClosedPetitionBlocks(description, petition, counts, outcome) {
   const emoji = outcome === 'OVERTURNED' ? '\u2705' : '\u274C';
+  const totalVotes = counts.overturn + counts.uphold;
   return [
     {
       type: 'header',
@@ -181,7 +144,7 @@ function buildClosedPetitionBlocks(description, petition, counts, totalUsers, ou
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `${emoji} *Result: ${outcome}*\n\n\u2705 *Overturn:* ${counts.overturn}  |  \u274C *Uphold:* ${counts.uphold}  |  Total users: ${totalUsers}`,
+        text: `${emoji} *Result: ${outcome}*\n\n\u2705 *Overturn:* ${counts.overturn}  |  \u274C *Uphold:* ${counts.uphold}  |  \uD83D\uDDF3\uFE0F Total votes: ${totalVotes}`,
       },
     },
     {
@@ -193,4 +156,4 @@ function buildClosedPetitionBlocks(description, petition, counts, totalUsers, ou
   ];
 }
 
-module.exports = { registerPetitionActions };
+module.exports = { registerPetitionActions, overturnAction, buildClosedPetitionBlocks };

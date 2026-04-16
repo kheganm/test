@@ -22,9 +22,12 @@ async function createPetition(petitionType, referenceId, createdBy, channelId) {
   });
   if (existing.rows.length > 0) throw new Error('There is already an open petition for this.');
 
+  // Petition closes 24 hours from now
+  const closesAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+
   const result = await db.execute({
-    sql: 'INSERT INTO petitions (petition_type, reference_id, created_by, channel_id) VALUES (?, ?, ?, ?)',
-    args: [petitionType, referenceId, createdBy, channelId],
+    sql: 'INSERT INTO petitions (petition_type, reference_id, created_by, channel_id, closes_at) VALUES (?, ?, ?, ?, ?)',
+    args: [petitionType, referenceId, createdBy, channelId, closesAt],
   });
 
   return getPetition(Number(result.lastInsertRowid));
@@ -44,11 +47,23 @@ async function castVote(petitionId, slackId, vote) {
   const petition = await getPetition(petitionId);
   if (!petition || petition.status !== 'open') throw new Error('This petition is no longer open.');
 
-  // Upsert vote
+  // Check if voting period has expired
+  if (petition.closes_at && new Date(petition.closes_at + 'Z').getTime() <= Date.now()) {
+    throw new Error('The voting period for this petition has ended.');
+  }
+
+  // Check if user already voted (no vote changes allowed)
+  const existing = await db.execute({
+    sql: 'SELECT id FROM petition_votes WHERE petition_id = ? AND slack_id = ?',
+    args: [petitionId, slackId],
+  });
+  if (existing.rows.length > 0) {
+    throw new Error('You have already voted on this petition. Votes cannot be changed.');
+  }
+
   await db.execute({
-    sql: `INSERT INTO petition_votes (petition_id, slack_id, vote) VALUES (?, ?, ?)
-          ON CONFLICT(petition_id, slack_id) DO UPDATE SET vote = ?`,
-    args: [petitionId, slackId, vote, vote],
+    sql: 'INSERT INTO petition_votes (petition_id, slack_id, vote) VALUES (?, ?, ?)',
+    args: [petitionId, slackId, vote],
   });
 }
 
@@ -88,4 +103,12 @@ async function getReferencedAction(petition) {
   }
 }
 
-module.exports = { createPetition, getPetition, setPetitionMessageTs, castVote, getVoteCounts, getTotalUserCount, closePetition, getReferencedAction };
+async function getExpiredPetitions() {
+  const result = await getDb().execute({
+    sql: "SELECT * FROM petitions WHERE status = 'open' AND closes_at IS NOT NULL AND closes_at <= datetime('now')",
+    args: [],
+  });
+  return result.rows;
+}
+
+module.exports = { createPetition, getPetition, setPetitionMessageTs, castVote, getVoteCounts, getTotalUserCount, closePetition, getReferencedAction, getExpiredPetitions };

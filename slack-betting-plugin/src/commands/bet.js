@@ -2,6 +2,7 @@ const { getDb } = require('../db');
 const { getBalance, addBalance, getOrCreateUser, getMoneySupply, suspendUser, getActiveSuspension, deductBalance } = require('../models/user');
 const { getActiveMarkets, getMarket, deleteMarket } = require('../models/market');
 const { getCftcBalance, addToCftcPool } = require('../models/cftc');
+const { getHouseBalance, addToHousePool } = require('../models/house');
 const { getUserBetsOnMarket, withdrawUserBets } = require('../models/bet');
 const { createLoan, repayLoan, getActiveLoansForUser } = require('../models/loan');
 const { isAdmin } = require('../utils/permissions');
@@ -22,7 +23,7 @@ function registerBetCommand(app) {
 
     // Check suspension for action commands (allow read-only + admin commands through)
     const readOnlyCommands = ['balance', 'leaderboard', 'economy', 'supply', 'markets', 'mybets', 'loans', 'petition', 'help', ''];
-    const adminCommands = ['give', 'reset', 'delete', 'suspend', 'fine'];
+    const adminCommands = ['give', 'reset', 'delete', 'suspend', 'fine', 'house'];
     if (!readOnlyCommands.includes(subcommand) && !adminCommands.includes(subcommand)) {
       const suspension = await getActiveSuspension(command.user_id);
       if (suspension) {
@@ -85,6 +86,9 @@ function registerBetCommand(app) {
       case 'delete':
         await handleDelete(command, args, respond, client);
         break;
+      case 'house':
+        await handleHouse(command, args, respond);
+        break;
       case 'help':
       case '':
       default:
@@ -121,6 +125,7 @@ async function handleLeaderboard(command, respond) {
 async function handleEconomy(command, respond) {
   const supply = await getMoneySupply();
   const cftcBalance = await getCftcBalance();
+  const houseBalance = await getHouseBalance();
   const sign = supply.inflationPct >= 0 ? '+' : '';
   const trend = supply.inflationPct > 0 ? '\uD83D\uDCC8' : supply.inflationPct < 0 ? '\uD83D\uDCC9' : '\u27A1\uFE0F';
 
@@ -132,7 +137,8 @@ async function handleEconomy(command, respond) {
     `\uD83D\uDCB5 *Current supply:* ${supply.currentSupply.toLocaleString()} coins`,
     `     \u2022 In wallets: ${supply.walletTotal.toLocaleString()} coins`,
     `     \u2022 Locked in markets: ${supply.lockedTotal.toLocaleString()} coins`,
-    `     \u2022 CFTC pool: ${cftcBalance.toLocaleString()} coins`,
+    `     \u2022 CFTC fine pool: ${cftcBalance.toLocaleString()} coins`,
+    `     \u2022 House pool (fixed-odds): ${houseBalance.toLocaleString()} coins`,
     '',
     `${trend} *Inflation:* ${sign}${supply.inflationPct.toFixed(2)}% from initial supply`,
   ].join('\n');
@@ -189,12 +195,20 @@ async function handleMyBets(command, args, respond) {
     return;
   }
 
+  const isFixedOdds = market.market_type === 'fixed_odds';
   const total = bets.reduce((sum, b) => sum + Number(b.amount), 0);
-  const lines = bets.map((b) => `• ${b.option_label}: ${b.amount} coins`);
+  const lines = bets.map((b) => {
+    if (isFixedOdds && b.locked_odds) {
+      const payout = Math.floor(Number(b.amount) * Number(b.locked_odds));
+      return `\u2022 ${b.option_label}: ${b.amount} coins at ${Number(b.locked_odds).toFixed(2)}x (payout: ${payout} coins)`;
+    }
+    return `\u2022 ${b.option_label}: ${b.amount} coins`;
+  });
 
+  const typeLabel = isFixedOdds ? ' (Fixed Odds)' : '';
   await respond({
     response_type: 'ephemeral',
-    text: `*Your bets on "${market.title}":*\n${lines.join('\n')}\n\nTotal wagered: *${total} coins*`,
+    text: `*Your bets on "${market.title}"${typeLabel}:*\n${lines.join('\n')}\n\nTotal wagered: *${total} coins*`,
   });
 }
 
@@ -518,6 +532,8 @@ async function handlePetition(command, args, respond, client) {
       description = `\uD83D\uDEA8 *Suspension #${referenceId}* — <@${action.slack_id}> was suspended\n\uD83D\uDCCB *Reason:* ${action.reason}`;
     }
 
+    const closesUnix = Math.floor(new Date(petition.closes_at + 'Z').getTime() / 1000);
+
     const result = await client.chat.postMessage({
       channel: command.channel_id,
       blocks: [
@@ -533,7 +549,7 @@ async function handlePetition(command, args, respond, client) {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `Filed by <@${command.user_id}>\n\n*Vote to overturn or uphold this action.* A majority of all registered users must vote to overturn for it to pass.\n\n\u2705 *Overturn:* 0  |  \u274C *Uphold:* 0`,
+            text: `Filed by <@${command.user_id}>\n\u23F0 *Voting closes:* <!date^${closesUnix}^{date_short_pretty} at {time}|${petition.closes_at}>\n\n*Vote to overturn or uphold this action.* Majority of votes cast when the 24h window closes wins. Votes are final and cannot be changed.\n\n\u2705 *Overturn:* 0  |  \u274C *Uphold:* 0  |  \uD83D\uDDF3\uFE0F *Total:* 0`,
           },
         },
         { type: 'divider' },
@@ -703,20 +719,49 @@ async function handleSuspend(command, args, respond, client) {
   }
 }
 
+async function handleHouse(command, args, respond) {
+  if (!isAdmin(command.user_id)) {
+    await respond({ response_type: 'ephemeral', text: '\uD83D\uDEAB Only admins can use `/bet house`.' });
+    return;
+  }
+
+  const amount = parseInt(args[1], 10);
+  if (!amount || amount <= 0) {
+    const balance = await getHouseBalance();
+    await respond({
+      response_type: 'ephemeral',
+      text: `\uD83C\uDFE6 *Fixed-Odds House Pool:* ${balance} coins\n\nUsage: \`/bet house 5000\` \u2014 Fund the house pool with 5000 coins`,
+    });
+    return;
+  }
+
+  await addToHousePool(amount);
+  const newBalance = await getHouseBalance();
+
+  await respond({
+    response_type: 'ephemeral',
+    text: `\uD83C\uDFE6 Added *${amount} coins* to the fixed-odds house pool. New balance: *${newBalance} coins*`,
+  });
+}
+
 async function handleHelp(respond) {
   await respond({
     response_type: 'ephemeral',
     text: [
       '*Betting Bot Commands:*',
-      '`/bet create` — Create a new betting market (with optional close date/time)',
+      '`/bet create` — Create a new betting market (Pool or Fixed Odds)',
       '`/bet balance` — Check your coin balance',
       '`/bet markets` — List active markets in this channel',
       '`/bet mybets <market_id>` — View your bets on a market',
       '`/bet withdraw <market_id>` — Withdraw all your bets from an open market',
       '`/bet leaderboard` — Show the top earners',
       '`/bet economy` — Show total money supply and inflation rate',
-      '`/bet petition fine <id>` — Petition to overturn a fine',
-      '`/bet petition suspension <id>` — Petition to overturn a suspension',
+      '`/bet petition fine <id>` — Petition to overturn a fine (24h voting window)',
+      '`/bet petition suspension <id>` — Petition to overturn a suspension (24h voting window)',
+      '',
+      '*Market Types:*',
+      '\u2022 *Pool (Parimutuel)* — All bets go into a shared pool. Winners split proportionally.',
+      '\u2022 *Fixed Odds* — Odds shift dynamically but lock at bet time. House pool covers shortfalls.',
       '',
       '*Loans:*',
       '`/bet loan @user 500 10` — Offer a 500 coin loan at 10% interest',
@@ -730,6 +775,7 @@ async function handleHelp(respond) {
       '`/bet delete <market_id>` — Delete a market and its message from the channel',
       '`/bet fine @user 500 Reason` — Fine a user (coins go to CFTC pool)',
       '`/bet suspend @user 3d Reason` — Suspend a user (`h`/`d`/`w`)',
+      '`/bet house 5000` — Fund the fixed-odds house pool',
       '',
       '`/bet help` — Show this help message',
     ].join('\n'),

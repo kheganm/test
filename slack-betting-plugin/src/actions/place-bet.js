@@ -1,8 +1,9 @@
 const { getMarket } = require('../models/market');
-const { placeBet } = require('../models/bet');
+const { placeBet, getPoolByOption, getTotalPool } = require('../models/bet');
 const { getBalance, getActiveSuspension } = require('../models/user');
 const { buildPlaceBetModal } = require('../views/modals');
 const { buildMarketMessage } = require('../views/market-message');
+const { calculateFixedOdds } = require('../utils/fixed-odds');
 
 function registerPlaceBetActions(app) {
   // Handle "Bet on this" button clicks — opens the bet modal
@@ -33,15 +34,31 @@ function registerPlaceBetActions(app) {
     const option = market.options.find((o) => Number(o.id) === optionId);
     const balance = await getBalance(body.user.id);
 
+    // For fixed-odds, compute current odds to show in modal
+    let currentOdds = null;
+    if (market.market_type === 'fixed_odds') {
+      const pools = await getPoolByOption(marketId);
+      const totalPool = await getTotalPool(marketId);
+      const betsPerOption = {};
+      for (const opt of market.options) {
+        betsPerOption[opt.id] = 0;
+      }
+      for (const p of pools) {
+        betsPerOption[p.option_id] = Number(p.pool);
+      }
+      const oddsMap = calculateFixedOdds(market.options, betsPerOption, totalPool);
+      currentOdds = oddsMap[optionId];
+    }
+
     await client.views.open({
       trigger_id: body.trigger_id,
-      view: buildPlaceBetModal(marketId, optionId, option.label, balance),
+      view: buildPlaceBetModal(marketId, optionId, option.label, balance, market.market_type, currentOdds),
     });
   });
 
   // Handle bet modal submission
   app.view('place_bet_submit', async ({ ack, view, body, client }) => {
-    const { marketId, optionId } = JSON.parse(view.private_metadata);
+    const { marketId, optionId, marketType } = JSON.parse(view.private_metadata);
     const amountStr = view.state.values.amount_block.amount_input.value;
     const amount = parseInt(amountStr, 10);
 
@@ -54,7 +71,24 @@ function registerPlaceBetActions(app) {
     }
 
     try {
-      await placeBet(body.user.id, marketId, optionId, amount);
+      // For fixed-odds, compute and lock odds at submission time
+      let lockedOdds = null;
+      if (marketType === 'fixed_odds') {
+        const market = await getMarket(marketId);
+        const pools = await getPoolByOption(marketId);
+        const totalPool = await getTotalPool(marketId);
+        const betsPerOption = {};
+        for (const opt of market.options) {
+          betsPerOption[opt.id] = 0;
+        }
+        for (const p of pools) {
+          betsPerOption[p.option_id] = Number(p.pool);
+        }
+        const oddsMap = calculateFixedOdds(market.options, betsPerOption, totalPool);
+        lockedOdds = oddsMap[optionId];
+      }
+
+      await placeBet(body.user.id, marketId, optionId, amount, lockedOdds);
       await ack();
 
       const market = await getMarket(marketId);
@@ -68,10 +102,17 @@ function registerPlaceBetActions(app) {
         });
       }
 
+      const optionLabel = market.options.find((o) => Number(o.id) === optionId)?.label;
+      let confirmText = `\u2705 Bet placed! You wagered *${amount} coins* on *${optionLabel}*.`;
+      if (lockedOdds) {
+        const potentialPayout = Math.floor(amount * lockedOdds);
+        confirmText = `\u2705 Bet placed! You wagered *${amount} coins* on *${optionLabel}* at *${lockedOdds.toFixed(2)}x* (potential payout: *${potentialPayout} coins*).`;
+      }
+
       await client.chat.postEphemeral({
         channel: market.channel_id,
         user: body.user.id,
-        text: `\u2705 Bet placed! You wagered *${amount} coins* on *${market.options.find((o) => Number(o.id) === optionId)?.label}*.`,
+        text: confirmText,
       });
     } catch (err) {
       await ack({

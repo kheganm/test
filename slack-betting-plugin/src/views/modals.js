@@ -9,6 +9,29 @@ function buildCreateMarketModal(channelId) {
     blocks: [
       {
         type: 'input',
+        block_id: 'market_type_block',
+        label: { type: 'plain_text', text: 'Market Type' },
+        element: {
+          type: 'static_select',
+          action_id: 'market_type_input',
+          initial_option: {
+            text: { type: 'plain_text', text: 'Pool (Parimutuel)' },
+            value: 'parimutuel',
+          },
+          options: [
+            {
+              text: { type: 'plain_text', text: 'Pool (Parimutuel)' },
+              value: 'parimutuel',
+            },
+            {
+              text: { type: 'plain_text', text: 'Fixed Odds' },
+              value: 'fixed_odds',
+            },
+          ],
+        },
+      },
+      {
+        type: 'input',
         block_id: 'title_block',
         label: { type: 'plain_text', text: 'Market Title' },
         element: {
@@ -42,6 +65,18 @@ function buildCreateMarketModal(channelId) {
       },
       {
         type: 'input',
+        block_id: 'initial_odds_block',
+        label: { type: 'plain_text', text: 'Initial Odds (Fixed Odds only — one per line, matching options)' },
+        optional: true,
+        element: {
+          type: 'plain_text_input',
+          action_id: 'initial_odds_input',
+          multiline: true,
+          placeholder: { type: 'plain_text', text: '2.50\n1.80\n(one decimal odds per option line)' },
+        },
+      },
+      {
+        type: 'input',
         block_id: 'close_date_block',
         label: { type: 'plain_text', text: 'Betting closes on (date)' },
         element: {
@@ -64,11 +99,17 @@ function buildCreateMarketModal(channelId) {
   };
 }
 
-function buildPlaceBetModal(marketId, optionId, optionLabel, balance) {
+function buildPlaceBetModal(marketId, optionId, optionLabel, balance, marketType = 'parimutuel', currentOdds = null) {
+  let infoText = `You're betting on: *${optionLabel}*\n\nYour balance: *${balance} coins*`;
+
+  if (marketType === 'fixed_odds' && currentOdds !== null) {
+    infoText += `\n\n\uD83C\uDFB2 *Current odds:* ${currentOdds.toFixed(2)}x\nYour payout = bet \u00D7 ${currentOdds.toFixed(2)}\n_Odds are locked at the time you place your bet._`;
+  }
+
   return {
     type: 'modal',
     callback_id: 'place_bet_submit',
-    private_metadata: JSON.stringify({ marketId, optionId }),
+    private_metadata: JSON.stringify({ marketId, optionId, marketType }),
     title: { type: 'plain_text', text: 'Place Your Bet' },
     submit: { type: 'plain_text', text: 'Place Bet' },
     close: { type: 'plain_text', text: 'Cancel' },
@@ -77,7 +118,7 @@ function buildPlaceBetModal(marketId, optionId, optionLabel, balance) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `You're betting on: *${optionLabel}*\n\nYour balance: *${balance} coins*`,
+          text: infoText,
         },
       },
       {

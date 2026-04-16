@@ -1,18 +1,21 @@
 const { getDb } = require('../db');
 const { CFTC_USER_ID } = require('./cftc');
+const { addToHousePool, deductFromHousePool } = require('./house');
 
-async function createMarket(title, description, createdBy, channelId, optionLabels, closeAt) {
+async function createMarket(title, description, createdBy, channelId, optionLabels, closeAt, marketType = 'parimutuel', initialOdds = null) {
   const db = getDb();
   const tx = await db.transaction('write');
   try {
     const result = await tx.execute({
-      sql: 'INSERT INTO markets (title, description, created_by, channel_id, close_at) VALUES (?, ?, ?, ?, ?)',
-      args: [title, description, createdBy, channelId, closeAt || null],
+      sql: 'INSERT INTO markets (title, description, created_by, channel_id, close_at, market_type) VALUES (?, ?, ?, ?, ?, ?)',
+      args: [title, description, createdBy, channelId, closeAt || null, marketType],
     });
     const marketId = Number(result.lastInsertRowid);
 
-    for (const label of optionLabels) {
-      await tx.execute({ sql: 'INSERT INTO options (market_id, label) VALUES (?, ?)', args: [marketId, label] });
+    for (let i = 0; i < optionLabels.length; i++) {
+      const label = optionLabels[i];
+      const odds = (marketType === 'fixed_odds' && initialOdds && initialOdds[i]) ? initialOdds[i] : null;
+      await tx.execute({ sql: 'INSERT INTO options (market_id, label, initial_odds) VALUES (?, ?, ?)', args: [marketId, label, odds] });
     }
     await tx.commit();
     return marketId;
@@ -61,6 +64,20 @@ async function getMarketsToClose() {
 
 async function resolveMarket(marketId, winningOptionId) {
   const db = getDb();
+
+  // Check market type
+  const marketCheck = await db.execute({ sql: 'SELECT market_type FROM markets WHERE id = ?', args: [marketId] });
+  const marketType = marketCheck.rows[0]?.market_type || 'parimutuel';
+
+  if (marketType === 'fixed_odds') {
+    return resolveFixedOddsMarket(marketId, winningOptionId);
+  }
+
+  return resolveParimutuelMarket(marketId, winningOptionId);
+}
+
+async function resolveParimutuelMarket(marketId, winningOptionId) {
+  const db = getDb();
   const tx = await db.transaction('write');
   try {
     await tx.execute({ sql: "UPDATE markets SET status = 'resolved', resolved_at = datetime('now') WHERE id = ?", args: [marketId] });
@@ -74,7 +91,7 @@ async function resolveMarket(marketId, winningOptionId) {
 
     if (winningPool === 0 || totalPool === 0) {
       await tx.commit();
-      return [];
+      return { payouts: [], marketType: 'parimutuel' };
     }
 
     const betsResult = await tx.execute({ sql: 'SELECT * FROM bets WHERE market_id = ? AND option_id = ?', args: [marketId, winningOptionId] });
@@ -85,7 +102,6 @@ async function resolveMarket(marketId, winningOptionId) {
       await tx.execute({ sql: 'UPDATE bets SET payout = ? WHERE id = ?', args: [payout, bet.id] });
 
       if (bet.slack_id === CFTC_USER_ID) {
-        // CFTC winnings go back to the pool
         await tx.execute({ sql: 'UPDATE cftc_pool SET balance = balance + ? WHERE id = 1', args: [payout] });
       } else {
         await tx.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE slack_id = ?', args: [payout, bet.slack_id] });
@@ -94,7 +110,51 @@ async function resolveMarket(marketId, winningOptionId) {
     }
 
     await tx.commit();
-    return payouts;
+    return { payouts, marketType: 'parimutuel' };
+  } catch (err) {
+    await tx.rollback();
+    throw err;
+  }
+}
+
+async function resolveFixedOddsMarket(marketId, winningOptionId) {
+  const db = getDb();
+  const tx = await db.transaction('write');
+  try {
+    await tx.execute({ sql: "UPDATE markets SET status = 'resolved', resolved_at = datetime('now') WHERE id = ?", args: [marketId] });
+    await tx.execute({ sql: 'UPDATE options SET is_winner = 1 WHERE id = ? AND market_id = ?', args: [winningOptionId, marketId] });
+
+    // Total collected from all bets
+    const totalResult = await tx.execute({ sql: 'SELECT COALESCE(SUM(amount), 0) as total FROM bets WHERE market_id = ?', args: [marketId] });
+    const totalCollected = Number(totalResult.rows[0].total);
+
+    // Get winning bets with their locked odds
+    const betsResult = await tx.execute({ sql: 'SELECT * FROM bets WHERE market_id = ? AND option_id = ?', args: [marketId, winningOptionId] });
+    const payouts = [];
+    let totalPayouts = 0;
+
+    for (const bet of betsResult.rows) {
+      const lockedOdds = Number(bet.locked_odds) || 2;
+      const payout = Math.floor(Number(bet.amount) * lockedOdds);
+      totalPayouts += payout;
+
+      await tx.execute({ sql: 'UPDATE bets SET payout = ? WHERE id = ?', args: [payout, bet.id] });
+      await tx.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE slack_id = ?', args: [payout, bet.slack_id] });
+      payouts.push({ slackId: bet.slack_id, amount: Number(bet.amount), payout, lockedOdds });
+    }
+
+    // House pool profit/loss
+    const houseDelta = totalCollected - totalPayouts;
+    if (houseDelta >= 0) {
+      // Surplus: house profits
+      await tx.execute({ sql: 'UPDATE house_pool SET balance = balance + ? WHERE id = 1', args: [houseDelta] });
+    } else {
+      // Deficit: house covers the shortfall
+      await tx.execute({ sql: 'UPDATE house_pool SET balance = balance - ? WHERE id = 1', args: [Math.abs(houseDelta)] });
+    }
+
+    await tx.commit();
+    return { payouts, marketType: 'fixed_odds', houseDelta };
   } catch (err) {
     await tx.rollback();
     throw err;
