@@ -4,7 +4,7 @@ const { getActiveMarkets, getMarket, deleteMarket } = require('../models/market'
 const { getCftcBalance, addToCftcPool } = require('../models/cftc');
 const { getHouseBalance, addToHousePool } = require('../models/house');
 const { getUserBetsOnMarket, withdrawUserBets } = require('../models/bet');
-const { createLoan, repayLoan, getActiveLoansForUser } = require('../models/loan');
+const { createLoan, repayLoan, getActiveLoansForUser, declareBankruptcy } = require('../models/loan');
 const { isAdmin } = require('../utils/permissions');
 const { createPetition, getReferencedAction } = require('../models/petition');
 const { resolveUserId } = require('../utils/resolve-user');
@@ -85,6 +85,9 @@ function registerBetCommand(app) {
         break;
       case 'delete':
         await handleDelete(command, args, respond, client);
+        break;
+      case 'bankrupt':
+        await handleBankrupt(command, respond, client);
         break;
       case 'house':
         await handleHouse(command, args, respond);
@@ -719,6 +722,37 @@ async function handleSuspend(command, args, respond, client) {
   }
 }
 
+async function handleBankrupt(command, respond, client) {
+  try {
+    const { defaultedLoans, cooldownUntil, startingBalance } = await declareBankruptcy(command.user_id);
+    const cooldownUnix = Math.floor(new Date(cooldownUntil + 'Z').getTime() / 1000);
+
+    const lenderLines = defaultedLoans.map(
+      (l) => `\u2022 <@${l.lender_id}>: *${l.total_owed} coins* defaulted (Loan #${l.id})`
+    );
+
+    await client.chat.postMessage({
+      channel: command.channel_id,
+      text: [
+        `\uD83D\uDCA5 *<@${command.user_id}> has declared bankruptcy!*`,
+        '',
+        `*${defaultedLoans.length} loan(s) defaulted:*`,
+        ...lenderLines,
+        '',
+        `\uD83D\uDCB0 Balance reset to *${startingBalance} coins*.`,
+        `\u23F3 Cannot take on new loans until <!date^${cooldownUnix}^{date_short_pretty} at {time}|${cooldownUntil}>.`,
+      ].join('\n'),
+    });
+
+    await respond({
+      response_type: 'ephemeral',
+      text: `\u2705 Bankruptcy declared. Your debts have been discharged and your balance reset to ${startingBalance} coins.`,
+    });
+  } catch (err) {
+    await respond({ response_type: 'ephemeral', text: `\u274C ${err.message}` });
+  }
+}
+
 async function handleHouse(command, args, respond) {
   if (!isAdmin(command.user_id)) {
     await respond({ response_type: 'ephemeral', text: '\uD83D\uDEAB Only admins can use `/bet house`.' });
@@ -768,6 +802,7 @@ async function handleHelp(respond) {
       '`/bet loan @user 500 10 3d` — Same, but due in 3 days (`d`=days, `w`=weeks)',
       '`/bet loans` — View your active/pending loans',
       '`/bet repay <loan_id>` — Repay a loan',
+      '`/bet bankrupt` — Declare bankruptcy: discharge all loans, reset balance, 14-day loan cooldown',
       '',
       '*Admin Commands:*',
       '`/bet give @user 500` — Give coins to a user',

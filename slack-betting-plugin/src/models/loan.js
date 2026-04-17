@@ -6,7 +6,14 @@ async function createLoan(lenderId, borrowerId, amount, interestRate, channelId,
   await getOrCreateUser(lenderId);
   await getOrCreateUser(borrowerId);
 
-  const lenderResult = await db.execute({ sql: 'SELECT * FROM users WHERE slack_id = ?', args: [lenderId] });
+  const borrowerResult = await db.execute({ sql: 'SELECT balance, bankrupt_until FROM users WHERE slack_id = ?', args: [borrowerId] });
+  const bankruptUntil = borrowerResult.rows[0]?.bankrupt_until;
+  if (bankruptUntil && new Date(bankruptUntil + 'Z') > new Date()) {
+    const until = new Date(bankruptUntil + 'Z');
+    throw new Error(`<@${borrowerId}> declared bankruptcy and cannot take on new loans until <!date^${Math.floor(until.getTime() / 1000)}^{date_short_pretty}|${bankruptUntil}>.`);
+  }
+
+  const lenderResult = await db.execute({ sql: 'SELECT balance FROM users WHERE slack_id = ?', args: [lenderId] });
   if (Number(lenderResult.rows[0].balance) < amount) {
     throw new Error(`You only have ${lenderResult.rows[0].balance} coins — can't lend ${amount}.`);
   }
@@ -28,6 +35,12 @@ async function acceptLoan(loanId) {
   const db = getDb();
   const loan = await getLoan(loanId);
   if (!loan || loan.status !== 'pending') return null;
+
+  const borrowerResult = await db.execute({ sql: 'SELECT bankrupt_until FROM users WHERE slack_id = ?', args: [loan.borrower_id] });
+  const bankruptUntil = borrowerResult.rows[0]?.bankrupt_until;
+  if (bankruptUntil && new Date(bankruptUntil + 'Z') > new Date()) {
+    throw new Error('You declared bankruptcy and cannot accept new loans during your cooldown period.');
+  }
 
   const tx = await db.transaction('write');
   try {
@@ -104,4 +117,52 @@ async function markLoanOverdueNotified(loanId) {
   });
 }
 
-module.exports = { createLoan, getLoan, acceptLoan, declineLoan, repayLoan, getActiveLoansForUser, getOverdueLoans, markLoanOverdueNotified };
+async function declareBankruptcy(slackId) {
+  const db = getDb();
+
+  // Check already in cooldown
+  const userResult = await db.execute({ sql: 'SELECT bankrupt_until FROM users WHERE slack_id = ?', args: [slackId] });
+  const bankruptUntil = userResult.rows[0]?.bankrupt_until;
+  if (bankruptUntil && new Date(bankruptUntil + 'Z') > new Date()) {
+    throw new Error(`You already declared bankruptcy and are still in your cooldown period (until ${bankruptUntil}).`);
+  }
+
+  // Fetch all active/overdue loans the user owes
+  const loansResult = await db.execute({
+    sql: "SELECT * FROM loans WHERE borrower_id = ? AND status IN ('active', 'overdue')",
+    args: [slackId],
+  });
+  const activeLoans = loansResult.rows;
+
+  if (activeLoans.length === 0) {
+    throw new Error('You have no active loans to discharge via bankruptcy.');
+  }
+
+  const startingBalance = parseInt(process.env.STARTING_BALANCE || '1000', 10);
+  const cooldownUntil = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+    .toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+
+  const tx = await db.transaction('write');
+  try {
+    // Default all active/overdue loans the user owes
+    await tx.execute({
+      sql: "UPDATE loans SET status = 'defaulted' WHERE borrower_id = ? AND status IN ('active', 'overdue')",
+      args: [slackId],
+    });
+
+    // Reset balance and set bankruptcy cooldown
+    await tx.execute({
+      sql: 'UPDATE users SET balance = ?, bankrupt_until = ? WHERE slack_id = ?',
+      args: [startingBalance, cooldownUntil, slackId],
+    });
+
+    await tx.commit();
+  } catch (err) {
+    await tx.rollback();
+    throw err;
+  }
+
+  return { defaultedLoans: activeLoans, cooldownUntil, startingBalance };
+}
+
+module.exports = { createLoan, getLoan, acceptLoan, declineLoan, repayLoan, getActiveLoansForUser, getOverdueLoans, markLoanOverdueNotified, declareBankruptcy };

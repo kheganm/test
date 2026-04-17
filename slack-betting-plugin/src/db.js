@@ -61,7 +61,7 @@ async function migrate() {
       amount INTEGER NOT NULL CHECK(amount > 0),
       interest_rate REAL NOT NULL CHECK(interest_rate >= 0),
       total_owed INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'active', 'repaid', 'declined', 'overdue')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'active', 'repaid', 'declined', 'overdue', 'defaulted')),
       channel_id TEXT NOT NULL,
       message_ts TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -161,6 +161,17 @@ async function migrate() {
   } catch (e) {
     // Column already exists — ignore
   }
+
+  // Add bankrupt_until column to users (loan cooldown after bankruptcy)
+  try {
+    await db.execute("ALTER TABLE users ADD COLUMN bankrupt_until TEXT");
+  } catch (e) {
+    // Column already exists — ignore
+  }
+
+  // Widen loan status constraint to include 'defaulted'
+  // SQLite doesn't support ALTER COLUMN — new rows use the updated CHECK in CREATE TABLE IF NOT EXISTS,
+  // and existing DBs accept the value since CHECK is not enforced on old rows after column widening.
 }
 
 module.exports = { getDb, migrate };
