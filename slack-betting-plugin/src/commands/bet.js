@@ -802,7 +802,7 @@ async function handleHelp(respond) {
       '`/bet loan @user 500 10 3d` — Same, but due in 3 days (`d`=days, `w`=weeks)',
       '`/bet loans` — View your active/pending loans',
       '`/bet repay <loan_id>` — Repay a loan',
-      '`/bet bankrupt` — Declare bankruptcy: discharge all loans, reset balance, 14-day loan cooldown',
+      '`/bet bankrupt` — Declare bankruptcy: discharge all loans, reset balance, 2-hour loan cooldown',
       '',
       '*Admin Commands:*',
       '`/bet give @user 500` — Give coins to a user',

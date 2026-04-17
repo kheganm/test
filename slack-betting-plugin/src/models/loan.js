@@ -139,7 +139,7 @@ async function declareBankruptcy(slackId) {
   }
 
   const startingBalance = parseInt(process.env.STARTING_BALANCE || '1000', 10);
-  const cooldownUntil = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+  const cooldownUntil = new Date(Date.now() + 2 * 60 * 60 * 1000)
     .toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
 
   const tx = await db.transaction('write');
